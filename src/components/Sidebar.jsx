@@ -28,13 +28,35 @@ export default function Sidebar({ open, setOpen }) {
           md:translate-x-0
         `}
       >
+        {/* Header */}
         <div className="p-6 border-b border-zinc-800">
           <h2 className="text-xl font-bold text-blue-500">
             INVENTARIO
           </h2>
         </div>
 
+        {/* Navegación */}
         <nav className="p-4 space-y-2">
+
+          {/* Home destacado */}
+          <Link
+            to="/"
+            onClick={() => setOpen(false)}
+            className={`
+              block px-4 py-3 rounded-lg font-semibold transition
+              ${
+                location.pathname === "/"
+                  ? "bg-blue-600 text-white"
+                  : "bg-blue-500 text-white hover:bg-blue-600"
+              }
+            `}
+          >
+            🏠 Home
+          </Link>
+
+          <div className="border-t border-zinc-800 my-4"></div>
+
+          {/* Otros enlaces */}
           {menuItems.map((item) => (
             <Link
               key={item.path}
