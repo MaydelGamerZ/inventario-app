@@ -1,326 +1,195 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ClipboardList, CalendarDays, User, PlusCircle } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
-import {
-  createTodayInventory,
-  getAllInventories,
-  getInventoryByDate,
-} from '../services/inventory';
-
-function getTodayDateKey() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
-
-function formatDateLabel(date) {
-  return new Intl.DateTimeFormat('es-MX', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  }).format(date);
-}
+import { Search, Save } from 'lucide-react';
 
 export default function InventoryDayPage() {
-  const navigate = useNavigate();
-  const { user } = useAuth();
+  const [products, setProducts] = useState([]);
+  const [search, setSearch] = useState('');
+  const [summary, setSummary] = useState({
+    total: 0,
+    faltantes: 0,
+    danados: 0,
+    caducados: 0,
+  });
 
-  const today = useMemo(() => new Date(), []);
-  const todayLabel = useMemo(() => formatDateLabel(today), [today]);
-  const todayDateKey = useMemo(() => getTodayDateKey(), []);
+  // 🔥 MOCK (luego se reemplaza con PDF o Firebase)
+  useEffect(() => {
+    const initialProducts = [
+      {
+        id: 1,
+        name: 'ZUCARITAS 600 GRS',
+        category: 'CEREALES',
+        quantity: '',
+        status: 'OK',
+        obs: '',
+      },
+      {
+        id: 2,
+        name: 'CHOCO KRISPIS 290 GRS',
+        category: 'CEREALES',
+        quantity: '',
+        status: 'OK',
+        obs: '',
+      },
+      {
+        id: 3,
+        name: 'PRINGLES ORIGINAL 40 GRS',
+        category: 'SNACKS',
+        quantity: '',
+        status: 'OK',
+        obs: '',
+      },
+    ];
 
-  const [todayInventory, setTodayInventory] = useState(null);
-  const [inventories, setInventories] = useState([]);
+    setProducts(initialProducts);
+  }, []);
 
-  const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  // 🧠 LÓGICA DE ESTADO AUTOMÁTICO
+  function calculateStatus(qty, obs) {
+    const num = Number(qty);
 
-  async function loadData() {
-    try {
-      setLoading(true);
-      setError('');
-      setSuccess('');
+    if (obs.toLowerCase().includes('dañado')) return 'DAÑADO';
+    if (obs.toLowerCase().includes('caducado')) return 'CADUCADO';
+    if (!num || num === 0) return 'FALTANTE';
+    return 'OK';
+  }
 
-      const [todayInventoryData, inventoriesData] = await Promise.all([
-        getInventoryByDate(todayDateKey),
-        getAllInventories(),
-      ]);
+  // 🔄 ACTUALIZAR PRODUCTO
+  const updateProduct = (id, field, value) => {
+    setProducts((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
 
-      setTodayInventory(todayInventoryData);
-      setInventories(inventoriesData);
-    } catch (err) {
-      console.error(err);
-      setError('No se pudo cargar la información del inventario.');
-    } finally {
-      setLoading(false);
+        const updated = { ...p, [field]: value };
+
+        updated.status = calculateStatus(updated.quantity, updated.obs);
+
+        return updated;
+      })
+    );
+  };
+
+  // 🔍 FILTRO
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) =>
+      p.name.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [products, search]);
+
+  // 📊 RESUMEN
+  useEffect(() => {
+    const total = products.length;
+    const faltantes = products.filter((p) => p.status === 'FALTANTE').length;
+    const danados = products.filter((p) => p.status === 'DAÑADO').length;
+    const caducados = products.filter((p) => p.status === 'CADUCADO').length;
+
+    setSummary({ total, faltantes, danados, caducados });
+  }, [products]);
+
+  // 🎨 COLORES
+  function getColor(status) {
+    switch (status) {
+      case 'OK':
+        return 'bg-emerald-900/30 text-emerald-400';
+      case 'FALTANTE':
+        return 'bg-red-900/30 text-red-400';
+      case 'DAÑADO':
+        return 'bg-zinc-800 text-zinc-300';
+      case 'CADUCADO':
+        return 'bg-yellow-900/30 text-yellow-400';
+      default:
+        return '';
     }
   }
 
-  useEffect(() => {
-    loadData();
-  }, [todayDateKey]);
-
-  const handleCreateTodayInventory = async () => {
-    try {
-      setCreating(true);
-      setError('');
-      setSuccess('');
-
-      const inventory = await createTodayInventory({
-        date: todayLabel,
-        dateKey: todayDateKey,
-        status: 'Abierto',
-        cedis: '',
-        week: '',
-        createdBy: user?.displayName || '',
-        userEmail: user?.email || '',
-      });
-
-      setTodayInventory(inventory);
-      setSuccess('Inventario del día creado correctamente.');
-      await loadData();
-    } catch (err) {
-      console.error(err);
-      setError(err.message || 'No se pudo crear el inventario del día.');
-    } finally {
-      setCreating(false);
-    }
-  };
-
   return (
     <div className="space-y-4">
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-white sm:text-4xl">
-              Inventario Diario
-            </h1>
-            <p className="mt-2 text-sm leading-7 text-zinc-400 sm:text-base">
-              Aquí se crea y administra el inventario base de cada día.
-            </p>
-          </div>
+      {/* HEADER */}
+      <div className="rounded-3xl bg-zinc-950 p-5 border border-zinc-800">
+        <h1 className="text-3xl font-bold text-white">Inventario Diario</h1>
+        <p className="text-zinc-400">Conteo físico del día</p>
+      </div>
 
-          <button
-            onClick={handleCreateTodayInventory}
-            disabled={creating || Boolean(todayInventory)}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+      {/* BUSCADOR */}
+      <div className="flex items-center gap-3 rounded-2xl bg-zinc-950 p-4 border border-zinc-800">
+        <Search className="text-zinc-400" />
+        <input
+          type="text"
+          placeholder="Buscar producto..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full bg-transparent outline-none text-white"
+        />
+      </div>
+
+      {/* RESUMEN */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-zinc-900 p-4 rounded-2xl">
+          <p className="text-zinc-400 text-sm">Total</p>
+          <p className="text-white text-xl font-bold">{summary.total}</p>
+        </div>
+
+        <div className="bg-red-900/30 p-4 rounded-2xl">
+          <p className="text-red-400 text-sm">Faltantes</p>
+          <p className="text-white text-xl font-bold">{summary.faltantes}</p>
+        </div>
+
+        <div className="bg-zinc-800 p-4 rounded-2xl">
+          <p className="text-zinc-300 text-sm">Dañados</p>
+          <p className="text-white text-xl font-bold">{summary.danados}</p>
+        </div>
+
+        <div className="bg-yellow-900/30 p-4 rounded-2xl">
+          <p className="text-yellow-400 text-sm">Caducados</p>
+          <p className="text-white text-xl font-bold">{summary.caducados}</p>
+        </div>
+      </div>
+
+      {/* LISTA */}
+      <div className="space-y-3">
+        {filteredProducts.map((p) => (
+          <div
+            key={p.id}
+            className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800"
           >
-            <PlusCircle size={18} />
-            {todayInventory
-              ? 'Inventario de hoy ya creado'
-              : creating
-                ? 'Creando...'
-                : 'Crear inventario del día'}
-          </button>
-        </div>
-      </section>
+            <p className="text-white font-semibold">{p.name}</p>
+            <p className="text-zinc-400 text-sm">{p.category}</p>
 
-      {error && (
-        <div className="rounded-2xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          {error}
-        </div>
-      )}
+            {/* INPUT */}
+            <div className="mt-3 flex gap-2">
+              <input
+                type="number"
+                placeholder="Cantidad"
+                value={p.quantity}
+                onChange={(e) =>
+                  updateProduct(p.id, 'quantity', e.target.value)
+                }
+                className="flex-1 bg-black border border-zinc-700 rounded-xl px-3 py-2 text-white"
+              />
 
-      {success && (
-        <div className="rounded-2xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
-          {success}
-        </div>
-      )}
-
-      <section className="grid gap-4 lg:grid-cols-3">
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-blue-400">
-              <CalendarDays size={22} />
+              <input
+                type="text"
+                placeholder="Observación"
+                value={p.obs}
+                onChange={(e) => updateProduct(p.id, 'obs', e.target.value)}
+                className="flex-1 bg-black border border-zinc-700 rounded-xl px-3 py-2 text-white"
+              />
             </div>
 
-            <div>
-              <p className="text-sm text-zinc-400">Fecha actual</p>
-              <h2 className="mt-2 text-2xl font-bold text-white">
-                {todayLabel}
-              </h2>
+            {/* ESTADO */}
+            <div
+              className={`mt-3 inline-block px-3 py-1 rounded-xl text-sm font-semibold ${getColor(p.status)}`}
+            >
+              {p.status}
             </div>
           </div>
-        </div>
+        ))}
+      </div>
 
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-emerald-400">
-              <ClipboardList size={22} />
-            </div>
-
-            <div>
-              <p className="text-sm text-zinc-400">Inventario de hoy</p>
-              <h2 className="mt-2 text-2xl font-bold text-white">
-                {loading
-                  ? 'Cargando...'
-                  : todayInventory
-                    ? 'Creado'
-                    : 'Pendiente'}
-              </h2>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-zinc-300">
-              <User size={22} />
-            </div>
-
-            <div className="min-w-0">
-              <p className="text-sm text-zinc-400">Usuario actual</p>
-              <h2 className="mt-2 break-all text-2xl font-bold text-white">
-                {user?.email || 'Sin usuario'}
-              </h2>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-        <div className="mb-4">
-          <h2 className="text-2xl font-bold text-white">
-            Inventario activo del día
-          </h2>
-        </div>
-
-        {loading ? (
-          <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
-            Cargando inventario...
-          </div>
-        ) : !todayInventory ? (
-          <div className="rounded-2xl border border-dashed border-zinc-800 bg-black px-4 py-6 text-zinc-400">
-            Aún no existe un inventario para hoy.
-          </div>
-        ) : (
-          <div className="rounded-3xl border border-zinc-800 bg-black p-5">
-            <div className="grid gap-4 lg:grid-cols-4">
-              <div>
-                <p className="text-sm text-zinc-400">Fecha</p>
-                <p className="mt-2 text-xl font-semibold text-white">
-                  {todayInventory.date || 'Sin fecha'}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-sm text-zinc-400">Estado</p>
-                <p className="mt-2 text-xl font-semibold text-emerald-400">
-                  {todayInventory.status || 'Abierto'}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-sm text-zinc-400">Cedis</p>
-                <p className="mt-2 text-xl font-semibold text-white">
-                  {todayInventory.cedis || 'Sin definir'}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-sm text-zinc-400">Semana</p>
-                <p className="mt-2 text-xl font-semibold text-white">
-                  {todayInventory.week || 'Sin definir'}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-5">
-              <Link
-                to={`/inventario/${todayInventory.id}`}
-                className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500"
-              >
-                Abrir inventario del día
-              </Link>
-            </div>
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-        <div className="mb-4">
-          <h2 className="text-2xl font-bold text-white">
-            Historial de inventarios
-          </h2>
-          <p className="mt-1 text-sm text-zinc-400">
-            Más adelante aquí veremos el historial completo, filtros y reportes.
-          </p>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="min-w-full overflow-hidden rounded-2xl border border-zinc-800 bg-black">
-            <thead>
-              <tr className="border-b border-zinc-800 text-left">
-                <th className="px-4 py-4 text-sm font-semibold text-zinc-300">
-                  Fecha
-                </th>
-                <th className="px-4 py-4 text-sm font-semibold text-zinc-300">
-                  Estado
-                </th>
-                <th className="px-4 py-4 text-sm font-semibold text-zinc-300">
-                  Cedis
-                </th>
-                <th className="px-4 py-4 text-sm font-semibold text-zinc-300">
-                  Semana
-                </th>
-                <th className="px-4 py-4 text-sm font-semibold text-zinc-300">
-                  Acción
-                </th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="5" className="px-4 py-6 text-sm text-zinc-400">
-                    Cargando inventarios...
-                  </td>
-                </tr>
-              ) : inventories.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className="px-4 py-6 text-sm text-zinc-400">
-                    No hay inventarios registrados.
-                  </td>
-                </tr>
-              ) : (
-                inventories.map((inventory) => (
-                  <tr
-                    key={inventory.id}
-                    className="border-b border-zinc-900 last:border-b-0"
-                  >
-                    <td className="px-4 py-4 text-white">
-                      {inventory.date || 'Sin fecha'}
-                    </td>
-                    <td className="px-4 py-4 text-white">
-                      {inventory.status || 'Sin estado'}
-                    </td>
-                    <td className="px-4 py-4 text-white">
-                      {inventory.cedis || 'Sin cedis'}
-                    </td>
-                    <td className="px-4 py-4 text-white">
-                      {inventory.week || 'Sin semana'}
-                    </td>
-                    <td className="px-4 py-4">
-                      <Link
-                        to={`/inventario/${inventory.id}`}
-                        className="font-medium text-blue-400 transition hover:text-blue-300"
-                      >
-                        Ver detalle
-                      </Link>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      {/* BOTÓN GUARDAR */}
+      <button className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-2xl font-semibold">
+        <Save size={18} />
+        Guardar inventario
+      </button>
     </div>
   );
 }
