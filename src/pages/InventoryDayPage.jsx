@@ -18,6 +18,7 @@ function getTodayDateString() {
 
 function formatDate(dateString) {
   if (!dateString) return 'Sin fecha';
+
   const date = new Date(`${dateString}T00:00:00`);
 
   return date.toLocaleDateString('es-MX', {
@@ -51,8 +52,8 @@ export default function InventoryDayPage() {
       setTodayInventory(inventoryToday);
       setInventories(allInventories);
     } catch (error) {
-      console.error(error);
-      setMessage('Error al cargar inventarios.');
+      console.error('Error al cargar inventarios:', error);
+      setMessage(error.message || 'Error al cargar inventarios.');
     } finally {
       setLoading(false);
     }
@@ -68,13 +69,12 @@ export default function InventoryDayPage() {
       setMessage('');
 
       const created = await createTodayInventory(user);
-
       setTodayInventory(created);
-      await loadData();
 
+      await loadData();
       setMessage('Inventario del día creado correctamente.');
     } catch (error) {
-      console.error(error);
+      console.error('Error al crear inventario:', error);
       setMessage(error.message || 'No se pudo crear el inventario.');
     } finally {
       setCreating(false);
@@ -154,7 +154,7 @@ export default function InventoryDayPage() {
 
               <div>
                 <p className="text-sm text-zinc-400">Estado</p>
-                <p className="mt-1 font-semibold text-green-400">
+                <p className="mt-1 font-semibold text-green-400 capitalize">
                   {todayInventory.estado}
                 </p>
               </div>
