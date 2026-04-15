@@ -16,6 +16,8 @@ import {
   subscribeInventoryByDate,
   subscribeAllInventories,
 } from '../services/inventory';
+// Importa el exportador de PDF
+import { exportInventoryToPDF } from '../services/pdfExporter';
 
 /**
  * Devuelve la fecha actual en formato yyyy-mm-dd.
@@ -297,12 +299,21 @@ export default function InventoryDayPage() {
             </p>
           </div>
           {todayInventory?.id && (
-            <Link
-              to={`/inventario/${todayInventory.id}`}
-              className="inline-flex items-center justify-center rounded-2xl border border-zinc-700 bg-black px-4 py-3 font-medium text-white transition hover:border-zinc-500"
-            >
-              {hasCountedItems ? 'Abrir detalle' : 'Iniciar conteo'}
-            </Link>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Link
+                to={`/inventario/${todayInventory.id}`}
+                className="inline-flex items-center justify-center rounded-2xl border border-zinc-700 bg-black px-4 py-3 font-medium text-white transition hover:border-zinc-500"
+              >
+                {hasCountedItems ? 'Abrir detalle' : 'Iniciar conteo'}
+              </Link>
+              {/* botón de descarga para el inventario del día */}
+              <button
+                onClick={() => exportInventoryToPDF(todayInventory)}
+                className="inline-flex items-center justify-center rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500"
+              >
+                Descargar
+              </button>
+            </div>
           )}
         </div>
 
@@ -531,6 +542,13 @@ export default function InventoryDayPage() {
                           Editar
                         </Link>
                       )}
+                      {/* botón de descarga para cada inventario del historial */}
+                      <button
+                        onClick={() => exportInventoryToPDF(inv)}
+                        className="inline-flex items-center justify-center rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-2 font-medium text-white transition hover:bg-emerald-500"
+                      >
+                        Descargar
+                      </button>
                     </div>
                   </div>
                 </div>

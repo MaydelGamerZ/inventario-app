@@ -145,7 +145,7 @@ export default function InventoryHistoryPage() {
                         Editar
                       </button>
                     )}
-                    {/* nuevo botón de descarga */}
+                    {/* botón de descarga */}
                     <button
                       onClick={() => exportInventoryToPDF(inv)}
                       className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-emerald-500"
