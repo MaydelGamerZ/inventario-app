@@ -115,6 +115,16 @@ export default function InventoryDayPage() {
     };
   }, [todayInventory]);
 
+  // Indica si al menos un producto del inventario de hoy tiene conteo físico.
+  const hasCountedItems = useMemo(() => {
+    const items = todayInventory?.items || [];
+    return items.some(
+      (item) =>
+        item.countedQuantity != null &&
+        String(item.countedQuantity).trim() !== ''
+    );
+  }, [todayInventory]);
+
   // Abrir selector de archivo.
   const handleOpenPicker = () => fileInputRef.current?.click();
 
@@ -291,7 +301,7 @@ export default function InventoryDayPage() {
               to={`/inventario/${todayInventory.id}`}
               className="inline-flex items-center justify-center rounded-2xl border border-zinc-700 bg-black px-4 py-3 font-medium text-white transition hover:border-zinc-500"
             >
-              Abrir detalle
+              {hasCountedItems ? 'Abrir detalle' : 'Iniciar conteo'}
             </Link>
           )}
         </div>
@@ -482,6 +492,12 @@ export default function InventoryDayPage() {
           ) : (
             allInventories.slice(0, 20).map((inv) => {
               const isToday = inv.dateKey === todayDateKey;
+              // Determina si este inventario ya tiene algún conteo físico registrado.
+              const hasCounted = (inv.items || []).some(
+                (item) =>
+                  item.countedQuantity != null &&
+                  String(item.countedQuantity).trim() !== ''
+              );
               return (
                 <div
                   key={inv.id}
@@ -504,7 +520,7 @@ export default function InventoryDayPage() {
                         to={`/inventario/${inv.id}`}
                         className="inline-flex items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-2 font-medium text-white transition hover:border-zinc-500"
                       >
-                        Ver detalle
+                        {hasCounted ? 'Ver detalle' : 'Iniciar conteo'}
                       </Link>
                       {/* Mostrar botón Editar solo si corresponde al día de hoy */}
                       {isToday && (
