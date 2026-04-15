@@ -1,6 +1,5 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
-/* Base styles for the application. Sets default margins and fonts. */
 html,
 body,
 #root {
