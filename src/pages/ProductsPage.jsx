@@ -20,7 +20,8 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react';
-import { db } from '../lib/firebase';
+// IMPORT CORREGIDA: apuntamos a ../firebase en lugar de ../lib/firebase
+import { db } from '../firebase';
 
 function getTodayKey() {
   const now = new Date();
@@ -38,7 +39,6 @@ function normalizeStock(value) {
   const cleaned = String(value ?? '')
     .replace(/[^\d.-]/g, '')
     .trim();
-
   const number = Number(cleaned);
   if (Number.isNaN(number) || number < 0) return 0;
   return Math.floor(number);
@@ -74,7 +74,6 @@ export default function ProductsPage() {
     setLoading(true);
     setPageError('');
     setPageSuccess('');
-
     try {
       const productsRef = collection(
         db,
@@ -82,10 +81,8 @@ export default function ProductsPage() {
         todayKey,
         PRODUCTS_SUBCOLLECTION
       );
-
       const q = query(productsRef, orderBy('category'), orderBy('name'));
       const snapshot = await getDocs(q);
-
       const rows = snapshot.docs.map((item) => ({
         id: item.id,
         name: item.data().name || '',
@@ -95,7 +92,6 @@ export default function ProductsPage() {
         updatedAt: item.data().updatedAt || null,
         isDirty: false,
       }));
-
       setProducts(rows);
     } catch (error) {
       console.error(error);
@@ -124,24 +120,19 @@ export default function ProductsPage() {
   async function saveRow(product) {
     setPageError('');
     setPageSuccess('');
-
     const cleanName = normalizeText(product.name);
     const cleanCategory = normalizeText(product.category);
     const cleanStock = normalizeStock(product.stock);
-
     if (!cleanName) {
       setPageError('Cada producto debe tener nombre.');
       return;
     }
-
     if (!cleanCategory) {
       setPageError('Cada producto debe tener categoría.');
       return;
     }
-
     try {
       setSavingRowId(product.id);
-
       const dayRef = doc(db, INVENTORY_COLLECTION, todayKey);
       const productRef = doc(
         db,
@@ -150,7 +141,6 @@ export default function ProductsPage() {
         PRODUCTS_SUBCOLLECTION,
         product.id
       );
-
       await setDoc(
         dayRef,
         {
@@ -159,14 +149,12 @@ export default function ProductsPage() {
         },
         { merge: true }
       );
-
       await updateDoc(productRef, {
         name: cleanName,
         category: cleanCategory,
         stock: cleanStock,
         updatedAt: serverTimestamp(),
       });
-
       setProducts((prev) =>
         prev.map((item) =>
           item.id === product.id
@@ -180,7 +168,6 @@ export default function ProductsPage() {
             : item
         )
       );
-
       setPageSuccess('Producto actualizado correctamente.');
     } catch (error) {
       console.error(error);
@@ -193,26 +180,21 @@ export default function ProductsPage() {
   async function addProduct() {
     setPageError('');
     setPageSuccess('');
-
     const cleanName = normalizeText(newProduct.name);
     const cleanCategory = normalizeText(newProduct.category);
     const cleanStock = normalizeStock(newProduct.stock);
-
     if (!cleanName) {
       setPageError('Escribe el nombre del producto.');
       return;
     }
-
     if (!cleanCategory) {
       setPageError('Escribe la categoría del producto.');
       return;
     }
-
     try {
       const id =
         crypto?.randomUUID?.() ||
         `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
       const dayRef = doc(db, INVENTORY_COLLECTION, todayKey);
       const productRef = doc(
         db,
@@ -221,7 +203,6 @@ export default function ProductsPage() {
         PRODUCTS_SUBCOLLECTION,
         id
       );
-
       await setDoc(
         dayRef,
         {
@@ -231,7 +212,6 @@ export default function ProductsPage() {
         },
         { merge: true }
       );
-
       await setDoc(productRef, {
         name: cleanName,
         category: cleanCategory,
@@ -239,7 +219,6 @@ export default function ProductsPage() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-
       setProducts((prev) => [
         {
           id,
@@ -250,13 +229,11 @@ export default function ProductsPage() {
         },
         ...prev,
       ]);
-
       setNewProduct({
         name: '',
         category: '',
         stock: '',
       });
-
       setPageSuccess('Producto agregado correctamente.');
     } catch (error) {
       console.error(error);
@@ -267,16 +244,12 @@ export default function ProductsPage() {
   async function removeProduct(id) {
     setPageError('');
     setPageSuccess('');
-
     const confirmed = window.confirm(
       '¿Seguro que quieres quitar este producto del inventario del día?'
     );
-
     if (!confirmed) return;
-
     try {
       setDeletingRowId(id);
-
       const productRef = doc(
         db,
         INVENTORY_COLLECTION,
@@ -284,9 +257,7 @@ export default function ProductsPage() {
         PRODUCTS_SUBCOLLECTION,
         id
       );
-
       await deleteDoc(productRef);
-
       setProducts((prev) => prev.filter((item) => item.id !== id));
       setPageSuccess('Producto eliminado correctamente.');
     } catch (error) {
@@ -301,7 +272,6 @@ export default function ProductsPage() {
     const unique = new Set(
       products.map((item) => normalizeText(item.category)).filter(Boolean)
     );
-
     return ['TODAS', ...Array.from(unique).sort((a, b) => a.localeCompare(b))];
   }, [products]);
 
@@ -310,20 +280,16 @@ export default function ProductsPage() {
       const matchesSearch =
         item.name.toLowerCase().includes(search.toLowerCase()) ||
         item.category.toLowerCase().includes(search.toLowerCase());
-
       const matchesCategory =
         categoryFilter === 'TODAS' || item.category === categoryFilter;
-
       return matchesSearch && matchesCategory;
     });
   }, [products, search, categoryFilter]);
 
   const totalProducts = products.length;
-
   const totalStock = useMemo(() => {
     return products.reduce((acc, item) => acc + normalizeStock(item.stock), 0);
   }, [products]);
-
   const dirtyCount = useMemo(() => {
     return products.filter((item) => item.isDirty).length;
   }, [products]);
@@ -332,7 +298,6 @@ export default function ProductsPage() {
     <div className="space-y-6">
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 sm:p-6">
         <p className="text-sm font-medium text-blue-400">Editor del día</p>
-
         <div className="mt-2 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-3xl">
             <h1 className="text-3xl font-bold text-white sm:text-4xl">
@@ -344,7 +309,6 @@ export default function ProductsPage() {
               manualmente. En esta pantalla no se suben PDFs.
             </p>
           </div>
-
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-sm text-zinc-300">
             <span className="block text-zinc-500">Fecha activa</span>
             <span className="font-semibold text-white">{todayKey}</span>
@@ -386,7 +350,6 @@ export default function ProductsPage() {
             Agregar producto manualmente
           </h2>
         </div>
-
         <div className="mt-4 grid gap-3 md:grid-cols-4">
           <input
             type="text"
@@ -397,7 +360,6 @@ export default function ProductsPage() {
             }
             className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
           />
-
           <input
             type="text"
             placeholder="Categoría"
@@ -407,7 +369,6 @@ export default function ProductsPage() {
             }
             className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
           />
-
           <input
             type="number"
             min="0"
@@ -418,7 +379,6 @@ export default function ProductsPage() {
             }
             className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
           />
-
           <button
             onClick={addProduct}
             className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-500"
@@ -439,7 +399,6 @@ export default function ProductsPage() {
               Solo se muestran productos del inventario base activo hoy.
             </p>
           </div>
-
           <div className="flex flex-col gap-3 md:flex-row">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
@@ -451,7 +410,6 @@ export default function ProductsPage() {
                 className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 py-3 pl-10 pr-4 text-white outline-none transition focus:border-blue-500 md:w-72"
               />
             </div>
-
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
@@ -491,6 +449,7 @@ export default function ProductsPage() {
           </div>
         ) : (
           <>
+            {/* Tabla grande para pantallas XL */}
             <div className="mt-6 hidden overflow-hidden rounded-3xl border border-zinc-800 xl:block">
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-zinc-800">
@@ -510,12 +469,10 @@ export default function ProductsPage() {
                       </th>
                     </tr>
                   </thead>
-
                   <tbody className="divide-y divide-zinc-800 bg-zinc-950">
                     {filteredProducts.map((product) => {
                       const isSaving = savingRowId === product.id;
                       const isDeleting = deletingRowId === product.id;
-
                       return (
                         <tr key={product.id} className="align-top">
                           <td className="px-4 py-4">
@@ -532,7 +489,6 @@ export default function ProductsPage() {
                               className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
                             />
                           </td>
-
                           <td className="px-4 py-4">
                             <input
                               type="text"
@@ -547,7 +503,6 @@ export default function ProductsPage() {
                               className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
                             />
                           </td>
-
                           <td className="px-4 py-4">
                             <input
                               type="number"
@@ -563,7 +518,6 @@ export default function ProductsPage() {
                               className="w-32 rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
                             />
                           </td>
-
                           <td className="px-4 py-4">
                             <div className="flex items-center justify-end gap-2">
                               <button
@@ -574,7 +528,6 @@ export default function ProductsPage() {
                                 <Save className="h-4 w-4" />
                                 {isSaving ? 'Guardando...' : 'Guardar'}
                               </button>
-
                               <button
                                 onClick={() => removeProduct(product.id)}
                                 disabled={isSaving || isDeleting}
@@ -593,11 +546,11 @@ export default function ProductsPage() {
               </div>
             </div>
 
+            {/* Lista vertical para pantallas pequeñas */}
             <div className="mt-6 grid gap-4 xl:hidden">
               {filteredProducts.map((product) => {
                 const isSaving = savingRowId === product.id;
                 const isDeleting = deletingRowId === product.id;
-
                 return (
                   <article
                     key={product.id}
@@ -617,7 +570,6 @@ export default function ProductsPage() {
                           className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
                         />
                       </div>
-
                       <div>
                         <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
                           Categoría
@@ -635,7 +587,6 @@ export default function ProductsPage() {
                           className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
                         />
                       </div>
-
                       <div>
                         <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
                           Stock
@@ -654,7 +605,6 @@ export default function ProductsPage() {
                           className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
                         />
                       </div>
-
                       <div className="grid grid-cols-2 gap-3 pt-2">
                         <button
                           onClick={() => saveRow(product)}
@@ -664,7 +614,6 @@ export default function ProductsPage() {
                           <Save className="h-4 w-4" />
                           {isSaving ? 'Guardando...' : 'Guardar'}
                         </button>
-
                         <button
                           onClick={() => removeProduct(product.id)}
                           disabled={isSaving || isDeleting}
@@ -694,7 +643,6 @@ function InfoCard({ icon, title, value, helper }) {
           {icon}
         </div>
       </div>
-
       <div className="mt-4">
         <p className="text-sm text-zinc-400">{title}</p>
         <h3 className="mt-1 text-2xl font-bold text-white">{value}</h3>
