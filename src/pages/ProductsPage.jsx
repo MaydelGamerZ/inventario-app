@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   collection,
-  deleteDoc,
   doc,
   getDocs,
   orderBy,
@@ -9,6 +8,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  deleteDoc,
 } from 'firebase/firestore';
 import {
   AlertCircle,
@@ -20,8 +20,8 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react';
-// IMPORT CORREGIDA: apuntamos a ../firebase en lugar de ../lib/firebase
 import { db } from '../firebase';
+import { getInventoryByDate, updateInventory } from '../services/inventory';
 
 function getTodayKey() {
   const now = new Date();
@@ -44,19 +44,17 @@ function normalizeStock(value) {
   return Math.floor(number);
 }
 
-const INVENTORY_COLLECTION = 'inventory_base';
-const PRODUCTS_SUBCOLLECTION = 'products';
-
 export default function ProductsPage() {
   const todayKey = getTodayKey();
 
+  const [inventoryId, setInventoryId] = useState(null);
+  const [inventoryData, setInventoryData] = useState(null);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingRowId, setSavingRowId] = useState(null);
   const [deletingRowId, setDeletingRowId] = useState(null);
   const [pageError, setPageError] = useState('');
   const [pageSuccess, setPageSuccess] = useState('');
-
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('TODAS');
 
@@ -67,37 +65,36 @@ export default function ProductsPage() {
   });
 
   useEffect(() => {
-    loadTodayProducts();
+    loadTodayInventory();
   }, []);
 
-  async function loadTodayProducts() {
+  async function loadTodayInventory() {
     setLoading(true);
     setPageError('');
     setPageSuccess('');
     try {
-      const productsRef = collection(
-        db,
-        INVENTORY_COLLECTION,
-        todayKey,
-        PRODUCTS_SUBCOLLECTION
-      );
-      const q = query(productsRef, orderBy('category'), orderBy('name'));
-      const snapshot = await getDocs(q);
-      const rows = snapshot.docs.map((item) => ({
-        id: item.id,
-        name: item.data().name || '',
-        category: item.data().category || '',
-        stock: item.data().stock ?? 0,
-        createdAt: item.data().createdAt || null,
-        updatedAt: item.data().updatedAt || null,
-        isDirty: false,
-      }));
-      setProducts(rows);
+      const inv = await getInventoryByDate(todayKey);
+      if (!inv) {
+        setInventoryId(null);
+        setInventoryData(null);
+        setProducts([]);
+      } else {
+        setInventoryId(inv.id);
+        setInventoryData(inv);
+        // Convert each item to a product row (we use the index as itemIndex)
+        const mapped = inv.items.map((item, idx) => ({
+          id: idx, // for React key
+          itemIndex: idx,
+          name: item.productName || '',
+          category: item.categoryName || '',
+          stock: item.expectedQuantity ?? 0,
+          isDirty: false,
+        }));
+        setProducts(mapped);
+      }
     } catch (error) {
       console.error(error);
-      setPageError(
-        'No se pudieron cargar los productos del día. Revisa Firestore y la estructura de la colección.'
-      );
+      setPageError('No se pudo cargar el inventario del día.');
     } finally {
       setLoading(false);
     }
@@ -109,7 +106,7 @@ export default function ProductsPage() {
         item.id === id
           ? {
               ...item,
-              [field]: value,
+              [field]: field === 'stock' ? value : value,
               isDirty: true,
             }
           : item
@@ -120,41 +117,77 @@ export default function ProductsPage() {
   async function saveRow(product) {
     setPageError('');
     setPageSuccess('');
+
     const cleanName = normalizeText(product.name);
     const cleanCategory = normalizeText(product.category);
     const cleanStock = normalizeStock(product.stock);
+
     if (!cleanName) {
       setPageError('Cada producto debe tener nombre.');
       return;
     }
+
     if (!cleanCategory) {
       setPageError('Cada producto debe tener categoría.');
       return;
     }
+
+    if (!inventoryId || !inventoryData) {
+      setPageError('No se ha cargado un inventario válido.');
+      return;
+    }
+
     try {
       setSavingRowId(product.id);
-      const dayRef = doc(db, INVENTORY_COLLECTION, todayKey);
-      const productRef = doc(
-        db,
-        INVENTORY_COLLECTION,
-        todayKey,
-        PRODUCTS_SUBCOLLECTION,
-        product.id
-      );
-      await setDoc(
-        dayRef,
-        {
-          dateKey: todayKey,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-      await updateDoc(productRef, {
-        name: cleanName,
-        category: cleanCategory,
-        stock: cleanStock,
-        updatedAt: serverTimestamp(),
-      });
+      const updatedItems = [...inventoryData.items];
+
+      // Actualiza el item existente según su índice, o lo crea
+      if (
+        product.itemIndex !== undefined &&
+        product.itemIndex < updatedItems.length
+      ) {
+        const original = updatedItems[product.itemIndex];
+        updatedItems[product.itemIndex] = {
+          ...original,
+          productName: cleanName,
+          categoryName: cleanCategory,
+          expectedQuantity: cleanStock,
+          // Recalcula el status (opcional)
+          status:
+            cleanStock <= 0
+              ? 'FALTANTE'
+              : original.unavailableQuantity > 0
+                ? 'ALERTA'
+                : 'OK',
+        };
+      } else {
+        updatedItems.push({
+          productName: cleanName,
+          categoryName: cleanCategory,
+          categoryCode: '',
+          categoryRaw: '',
+          supplierName: '',
+          supplierCode: '',
+          expectedQuantity: cleanStock,
+          unavailableQuantity: 0,
+          countedQuantity: '',
+          total: '',
+          difference: '',
+          observation: '',
+          status: cleanStock <= 0 ? 'FALTANTE' : 'OK',
+        });
+      }
+
+      const updatedInv = {
+        ...inventoryData,
+        items: updatedItems,
+        // mantén categories y demás campos sin cambios
+      };
+
+      await updateInventory(inventoryId, updatedInv);
+
+      // Refleja los cambios en el estado local
+      setInventoryData(updatedInv);
       setProducts((prev) =>
         prev.map((item) =>
           item.id === product.id
@@ -164,10 +197,15 @@ export default function ProductsPage() {
                 category: cleanCategory,
                 stock: cleanStock,
                 isDirty: false,
+                itemIndex:
+                  product.itemIndex !== undefined
+                    ? product.itemIndex
+                    : updatedItems.length - 1,
               }
             : item
         )
       );
+
       setPageSuccess('Producto actualizado correctamente.');
     } catch (error) {
       console.error(error);
@@ -180,48 +218,58 @@ export default function ProductsPage() {
   async function addProduct() {
     setPageError('');
     setPageSuccess('');
+
     const cleanName = normalizeText(newProduct.name);
     const cleanCategory = normalizeText(newProduct.category);
     const cleanStock = normalizeStock(newProduct.stock);
+
     if (!cleanName) {
       setPageError('Escribe el nombre del producto.');
       return;
     }
+
     if (!cleanCategory) {
       setPageError('Escribe la categoría del producto.');
       return;
     }
+
+    if (!inventoryId || !inventoryData) {
+      setPageError('No se ha cargado un inventario válido.');
+      return;
+    }
+
     try {
-      const id =
+      const newItem = {
+        productName: cleanName,
+        categoryName: cleanCategory,
+        categoryCode: '',
+        categoryRaw: '',
+        supplierName: '',
+        supplierCode: '',
+        expectedQuantity: cleanStock,
+        unavailableQuantity: 0,
+        countedQuantity: '',
+        total: '',
+        difference: '',
+        observation: '',
+        status: cleanStock <= 0 ? 'FALTANTE' : 'OK',
+      };
+
+      const updatedItems = [...inventoryData.items, newItem];
+      const updatedInv = { ...inventoryData, items: updatedItems };
+
+      await updateInventory(inventoryId, updatedInv);
+
+      setInventoryData(updatedInv);
+
+      const localId =
         crypto?.randomUUID?.() ||
         `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-      const dayRef = doc(db, INVENTORY_COLLECTION, todayKey);
-      const productRef = doc(
-        db,
-        INVENTORY_COLLECTION,
-        todayKey,
-        PRODUCTS_SUBCOLLECTION,
-        id
-      );
-      await setDoc(
-        dayRef,
-        {
-          dateKey: todayKey,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-      await setDoc(productRef, {
-        name: cleanName,
-        category: cleanCategory,
-        stock: cleanStock,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+
       setProducts((prev) => [
         {
-          id,
+          id: localId,
+          itemIndex: updatedItems.length - 1,
           name: cleanName,
           category: cleanCategory,
           stock: cleanStock,
@@ -229,11 +277,13 @@ export default function ProductsPage() {
         },
         ...prev,
       ]);
+
       setNewProduct({
         name: '',
         category: '',
         stock: '',
       });
+
       setPageSuccess('Producto agregado correctamente.');
     } catch (error) {
       console.error(error);
@@ -241,24 +291,50 @@ export default function ProductsPage() {
     }
   }
 
-  async function removeProduct(id) {
+  async function removeProduct(productId) {
     setPageError('');
     setPageSuccess('');
+
     const confirmed = window.confirm(
       '¿Seguro que quieres quitar este producto del inventario del día?'
     );
+
     if (!confirmed) return;
+
+    if (!inventoryId || !inventoryData) {
+      setPageError('No se ha cargado un inventario válido.');
+      return;
+    }
+
     try {
-      setDeletingRowId(id);
-      const productRef = doc(
-        db,
-        INVENTORY_COLLECTION,
-        todayKey,
-        PRODUCTS_SUBCOLLECTION,
-        id
+      setDeletingRowId(productId);
+      const item = products.find((p) => p.id === productId);
+      if (!item) {
+        setPageError('Producto no encontrado.');
+        return;
+      }
+
+      const idx = item.itemIndex;
+
+      const updatedItems = inventoryData.items.filter(
+        (_, index) => index !== idx
       );
-      await deleteDoc(productRef);
-      setProducts((prev) => prev.filter((item) => item.id !== id));
+
+      const updatedInv = { ...inventoryData, items: updatedItems };
+
+      await updateInventory(inventoryId, updatedInv);
+
+      setInventoryData(updatedInv);
+
+      setProducts((prev) =>
+        prev
+          .filter((p) => p.id !== productId)
+          .map((p) => ({
+            ...p,
+            itemIndex: p.itemIndex > idx ? p.itemIndex - 1 : p.itemIndex,
+          }))
+      );
+
       setPageSuccess('Producto eliminado correctamente.');
     } catch (error) {
       console.error(error);
@@ -449,7 +525,6 @@ export default function ProductsPage() {
           </div>
         ) : (
           <>
-            {/* Tabla grande para pantallas XL */}
             <div className="mt-6 hidden overflow-hidden rounded-3xl border border-zinc-800 xl:block">
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-zinc-800">
@@ -546,7 +621,6 @@ export default function ProductsPage() {
               </div>
             </div>
 
-            {/* Lista vertical para pantallas pequeñas */}
             <div className="mt-6 grid gap-4 xl:hidden">
               {filteredProducts.map((product) => {
                 const isSaving = savingRowId === product.id;
