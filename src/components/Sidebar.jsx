@@ -1,3 +1,4 @@
+// src/components/Sidebar.jsx
 import { NavLink } from 'react-router-dom';
 import { Home, ClipboardList, History, Boxes, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -31,7 +32,6 @@ export default function Sidebar({ collapsed = false, onNavigate = () => {} }) {
         >
           {collapsed ? 'INV' : 'INVENTARIO'}
         </h1>
-
         {!collapsed && (
           <p className="mt-2 text-sm text-zinc-400">Panel principal</p>
         )}
@@ -68,7 +68,6 @@ export default function Sidebar({ collapsed = false, onNavigate = () => {} }) {
                 {user?.email || 'usuario@correo.com'}
               </p>
             </div>
-
             <button
               onClick={handleLogout}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-500 active:scale-[0.98]"
