@@ -1,18 +1,10 @@
 import { NavLink } from 'react-router-dom';
-import {
-  Home,
-  ClipboardList,
-  History,
-  Boxes,
-  FileUp,
-  LogOut,
-} from 'lucide-react';
+import { Home, ClipboardList, History, Boxes, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/inventario-diario', label: 'Inventario Diario', icon: ClipboardList },
-  { to: '/importar', label: 'Importar PDF', icon: FileUp }, // ✅ NUEVO
   { to: '/historial', label: 'Historial de Inventarios', icon: History },
   { to: '/productos', label: 'Productos / Categorías', icon: Boxes },
 ];
@@ -23,7 +15,7 @@ export default function Sidebar({ collapsed = false, onNavigate = () => {} }) {
   const handleLogout = async () => {
     try {
       await logout();
-      onNavigate(); // 👉 importante para cerrar menú en móvil
+      onNavigate();
     } catch (error) {
       console.error('Error al cerrar sesión:', error);
     }
@@ -31,7 +23,6 @@ export default function Sidebar({ collapsed = false, onNavigate = () => {} }) {
 
   return (
     <aside className="flex h-full w-full flex-col bg-zinc-950 text-white">
-      {/* HEADER */}
       <div className="border-b border-zinc-800 px-4 py-6">
         <h1
           className={`font-bold tracking-tight ${
@@ -46,7 +37,6 @@ export default function Sidebar({ collapsed = false, onNavigate = () => {} }) {
         )}
       </div>
 
-      {/* NAV */}
       <nav className="flex-1 space-y-2 px-3 py-4">
         {navItems.map(({ to, label, icon: Icon }) => (
           <NavLink
@@ -69,7 +59,6 @@ export default function Sidebar({ collapsed = false, onNavigate = () => {} }) {
         ))}
       </nav>
 
-      {/* FOOTER */}
       <div className="border-t border-zinc-800 p-4">
         {!collapsed ? (
           <>
