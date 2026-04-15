@@ -43,7 +43,6 @@ export async function getInventoryByDate(date) {
 
 export async function createTodayInventory(user) {
   const today = getTodayDateString();
-
   const existingInventory = await getInventoryByDate(today);
 
   if (existingInventory) {
@@ -92,9 +91,7 @@ export async function getAllInventories() {
     ...value,
   }));
 
-  inventories.sort((a, b) => {
-    return new Date(b.fecha) - new Date(a.fecha);
-  });
+  inventories.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
 
   return inventories;
 }
