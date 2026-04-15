@@ -19,18 +19,47 @@ const MONTHS_ES = {
   diciembre: '12',
 };
 
-function normalizeSpaces(text = '') {
-  return text.replace(/\s+/g, ' ').trim();
+function normalizeSpaces(value = '') {
+  return String(value).replace(/\s+/g, ' ').trim();
 }
 
-function cleanLine(text = '') {
+function cleanLine(value = '') {
   return normalizeSpaces(
-    text
+    String(value)
       .replace(/[_]+/g, ' ')
       .replace(/[|]+/g, ' ')
       .replace(/—/g, ' ')
       .replace(/–/g, ' ')
   );
+}
+
+function parseNumber(value) {
+  if (value === undefined || value === null) return 0;
+
+  const normalized = String(value).replace(/,/g, '').trim();
+  if (!normalized) return 0;
+
+  const parsed = Number(normalized);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function parseSpanishDateToKey(dateLabel) {
+  const normalized = normalizeSpaces(dateLabel).toLowerCase();
+
+  const match = normalized.match(
+    /^(\d{1,2})\s+de\s+([a-záéíóúñ]+)\s+de\s+(\d{4})$/i
+  );
+
+  if (!match) return '';
+
+  const day = String(Number(match[1])).padStart(2, '0');
+  const monthName = match[2].normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const year = match[3];
+  const month = MONTHS_ES[monthName];
+
+  if (!month) return '';
+
+  return `${year}-${month}-${day}`;
 }
 
 function isDecorativeLine(line) {
@@ -58,33 +87,53 @@ function isTotalLine(line) {
   return /^TOTAL(?:\s+GENERAL)?\.-/i.test(line);
 }
 
-function parseSpanishDateToKey(dateLabel) {
-  if (!dateLabel) return '';
+function parseCategoryHeader(rawHeader) {
+  const cleaned = cleanLine(rawHeader);
 
-  const match = normalizeSpaces(dateLabel)
-    .toLowerCase()
-    .match(/^(\d{1,2})\s+de\s+([a-záéíóúñ]+)\s+de\s+(\d{4})$/i);
+  const match = cleaned.match(/^(\d{2})\s*-\s*(.+?)\s*-\s*(\d+)\s*-\s*(.+)$/i);
 
-  if (!match) return '';
+  if (!match) {
+    return {
+      supplierCode: '',
+      supplierName: '',
+      categoryCode: '',
+      categoryName: cleaned,
+      categoryRaw: cleaned,
+    };
+  }
 
-  const day = String(Number(match[1])).padStart(2, '0');
-  const monthName = match[2].normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const year = match[3];
-  const month = MONTHS_ES[monthName];
-
-  if (!month) return '';
-
-  return `${year}-${month}-${day}`;
+  return {
+    supplierCode: normalizeSpaces(match[1]),
+    supplierName: normalizeSpaces(match[2]),
+    categoryCode: normalizeSpaces(match[3]),
+    categoryName: normalizeSpaces(match[4]),
+    categoryRaw: cleaned,
+  };
 }
 
-function parseNumber(value) {
-  if (value === undefined || value === null) return 0;
+function parseProductLine(line) {
+  const cleaned = cleanLine(line);
 
-  const cleaned = String(value).replace(/,/g, '').trim();
-  if (!cleaned) return 0;
+  if (!cleaned) return null;
+  if (isDecorativeLine(cleaned)) return null;
+  if (isCategoryHeader(cleaned)) return null;
+  if (isTotalLine(cleaned)) return null;
 
-  const parsed = Number(cleaned);
-  return Number.isNaN(parsed) ? 0 : parsed;
+  const match = cleaned.match(/^(.*?)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)$/);
+
+  if (!match) return null;
+
+  const productName = normalizeSpaces(match[1]);
+  const quantity = parseNumber(match[2]);
+  const noDisponible = parseNumber(match[3]);
+
+  if (!productName) return null;
+
+  return {
+    productName,
+    quantity,
+    noDisponible,
+  };
 }
 
 function extractMetaFromText(fullText) {
@@ -103,7 +152,7 @@ function extractMetaFromText(fullText) {
   const dateKey = parseSpanishDateToKey(dateLabel);
 
   return {
-    week: weekMatch ? weekMatch[1] : '',
+    week: weekMatch ? normalizeSpaces(weekMatch[1]) : '',
     dateLabel,
     dateKey,
     cedis: cedisMatch ? normalizeSpaces(cedisMatch[1]) : '',
@@ -111,59 +160,6 @@ function extractMetaFromText(fullText) {
     totalGeneralNoDisponible: totalGeneralMatch
       ? parseNumber(totalGeneralMatch[2])
       : 0,
-  };
-}
-
-function parseCategoryHeader(rawHeader) {
-  const cleaned = cleanLine(rawHeader);
-
-  const match = cleaned.match(/^(\d{2})\s*-\s*(.+?)\s*-\s*(\d+)\s*-\s*(.+)$/i);
-
-  if (!match) {
-    return {
-      supplierCode: '',
-      supplierName: '',
-      categoryCode: '',
-      categoryName: cleaned,
-      raw: cleaned,
-    };
-  }
-
-  return {
-    supplierCode: match[1],
-    supplierName: normalizeSpaces(match[2]),
-    categoryCode: match[3],
-    categoryName: normalizeSpaces(match[4]),
-    raw: cleaned,
-  };
-}
-
-function parseProductLine(line) {
-  const cleaned = cleanLine(line);
-
-  if (
-    !cleaned ||
-    isDecorativeLine(cleaned) ||
-    isCategoryHeader(cleaned) ||
-    isTotalLine(cleaned)
-  ) {
-    return null;
-  }
-
-  const match = cleaned.match(/^(.*?)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)$/);
-
-  if (!match) return null;
-
-  const productName = normalizeSpaces(match[1]);
-  const quantity = parseNumber(match[2]);
-  const noDisponible = parseNumber(match[3]);
-
-  if (!productName) return null;
-
-  return {
-    productName,
-    quantity,
-    noDisponible,
   };
 }
 
@@ -249,7 +245,11 @@ export async function parseInventoryPdf(file) {
 
       if (!categoriesMap.has(categoryKey)) {
         categoriesMap.set(categoryKey, {
-          ...currentCategory,
+          supplierCode: currentCategory.supplierCode,
+          supplierName: currentCategory.supplierName,
+          categoryCode: currentCategory.categoryCode,
+          categoryName: currentCategory.categoryName,
+          categoryRaw: currentCategory.categoryRaw,
           itemCount: 0,
           quantityTotal: 0,
           noDisponibleTotal: 0,
@@ -283,7 +283,7 @@ export async function parseInventoryPdf(file) {
       productName: parsedProduct.productName,
       categoryName: currentCategory.categoryName,
       categoryCode: currentCategory.categoryCode,
-      categoryRaw: currentCategory.raw,
+      categoryRaw: currentCategory.categoryRaw,
       supplierName: currentCategory.supplierName,
       supplierCode: currentCategory.supplierCode,
       expectedQuantity: parsedProduct.quantity,
@@ -302,6 +302,10 @@ export async function parseInventoryPdf(file) {
       categoryRef.quantityTotal += parsedProduct.quantity;
       categoryRef.noDisponibleTotal += parsedProduct.noDisponible;
     }
+  }
+
+  if (items.length === 0) {
+    throw new Error('No se detectaron productos válidos dentro del PDF.');
   }
 
   return {

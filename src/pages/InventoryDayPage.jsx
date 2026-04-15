@@ -14,7 +14,7 @@ import { parseInventoryPdf } from '../services/pdfInventoryParser';
 import {
   getAllInventories,
   getInventoryByDate,
-  saveParsedPdfInventory,
+  saveDailyInventoryFromPdf,
 } from '../services/inventory';
 
 function getTodayDateKey() {
@@ -30,7 +30,11 @@ function formatDateLabelFromKey(dateKey) {
   if (!dateKey) return 'Sin fecha';
 
   const [year, month, day] = dateKey.split('-').map(Number);
-  const date = new Date(year, (month || 1) - 1, day || 1);
+  const safeYear = year || new Date().getFullYear();
+  const safeMonth = month || 1;
+  const safeDay = day || 1;
+
+  const date = new Date(safeYear, safeMonth - 1, safeDay);
 
   return new Intl.DateTimeFormat('es-MX', {
     day: 'numeric',
@@ -42,13 +46,13 @@ function formatDateLabelFromKey(dateKey) {
 function getStatusColor(status) {
   switch (status) {
     case 'OK':
-      return 'bg-emerald-950/60 text-emerald-400 border-emerald-900/60';
+      return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
     case 'ALERTA':
-      return 'bg-yellow-950/60 text-yellow-400 border-yellow-900/60';
+      return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
     case 'FALTANTE':
-      return 'bg-red-950/60 text-red-400 border-red-900/60';
+      return 'border-red-900/60 bg-red-950/50 text-red-400';
     default:
-      return 'bg-zinc-900 text-zinc-300 border-zinc-800';
+      return 'border-zinc-800 bg-zinc-900 text-zinc-300';
   }
 }
 
@@ -74,6 +78,7 @@ export default function InventoryDayPage() {
     try {
       setLoading(true);
       setError('');
+
       const [todayData, allData] = await Promise.all([
         getInventoryByDate(todayDateKey),
         getAllInventories(),
@@ -141,15 +146,15 @@ export default function InventoryDayPage() {
     setSuccess('');
 
     try {
-      const parsed = await parseInventoryPdf(selectedFile);
-      const savedInventory = await saveParsedPdfInventory(
-        parsed,
+      const parsedInventory = await parseInventoryPdf(selectedFile);
+      const savedInventory = await saveDailyInventoryFromPdf(
+        parsedInventory,
         user?.email || ''
       );
 
       setTodayInventory(savedInventory);
       setSuccess(
-        `Inventario del ${parsed.dateLabel} cargado correctamente desde el PDF.`
+        `Inventario del ${parsedInventory.dateLabel} cargado correctamente.`
       );
 
       const freshHistory = await getAllInventories();
@@ -215,6 +220,7 @@ export default function InventoryDayPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-blue-400">
               <CalendarDays size={22} />
             </div>
+
             <div>
               <p className="text-sm text-zinc-400">Hoy</p>
               <h2 className="mt-2 text-2xl font-bold text-white">
@@ -229,6 +235,7 @@ export default function InventoryDayPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-emerald-400">
               <ClipboardList size={22} />
             </div>
+
             <div>
               <p className="text-sm text-zinc-400">Inventario de hoy</p>
               <h2 className="mt-2 text-2xl font-bold text-white">
@@ -247,6 +254,7 @@ export default function InventoryDayPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-yellow-400">
               <Boxes size={22} />
             </div>
+
             <div>
               <p className="text-sm text-zinc-400">Categorías del inventario</p>
               <h2 className="mt-2 text-2xl font-bold text-white">
@@ -261,6 +269,7 @@ export default function InventoryDayPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-zinc-300">
               <Package size={22} />
             </div>
+
             <div className="min-w-0">
               <p className="text-sm text-zinc-400">Usuario actual</p>
               <h2 className="mt-2 break-all text-lg font-bold text-white">
@@ -521,7 +530,7 @@ export default function InventoryDayPage() {
           <AlertTriangle className="mt-0.5 text-yellow-400" size={20} />
           <div className="text-sm leading-7 text-yellow-100">
             Si subes un PDF del mismo día, el sistema actualizará ese inventario
-            en vez de duplicarlo. Eso es lo correcto para tu operación diaria.
+            en vez de duplicarlo.
           </div>
         </div>
       </section>
