@@ -7,6 +7,7 @@ import InventoryDetailPage from '../pages/InventoryDetailPage';
 import LoginPage from '../pages/LoginPage';
 import NotFoundPage from '../pages/NotFoundPage';
 import ProductsPage from '../pages/ProductsPage';
+import ImportPDFPage from '../pages/ImportPDFPage';
 
 function HistorialPage() {
   return (
@@ -39,6 +40,7 @@ export default function AppRouter() {
           <Route path="/inventario/:id" element={<InventoryDetailPage />} />
           <Route path="/historial" element={<HistorialPage />} />
           <Route path="/productos" element={<ProductsPage />} />
+          <Route path="/importar" element={<ImportPDFPage />} />
         </Route>
 
         <Route path="*" element={<NotFoundPage />} />

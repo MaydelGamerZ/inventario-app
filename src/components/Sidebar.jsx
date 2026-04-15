@@ -1,10 +1,18 @@
 import { NavLink } from 'react-router-dom';
-import { Home, ClipboardList, History, Boxes, LogOut } from 'lucide-react';
+import {
+  Home,
+  ClipboardList,
+  History,
+  Boxes,
+  FileUp,
+  LogOut,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/inventario-diario', label: 'Inventario Diario', icon: ClipboardList },
+  { to: '/importar', label: 'Importar PDF', icon: FileUp }, // ✅ NUEVO
   { to: '/historial', label: 'Historial de Inventarios', icon: History },
   { to: '/productos', label: 'Productos / Categorías', icon: Boxes },
 ];
@@ -15,14 +23,15 @@ export default function Sidebar({ collapsed = false, onNavigate = () => {} }) {
   const handleLogout = async () => {
     try {
       await logout();
-      onNavigate();
+      onNavigate(); // 👉 importante para cerrar menú en móvil
     } catch (error) {
       console.error('Error al cerrar sesión:', error);
     }
   };
 
   return (
-    <div className="flex h-full flex-col bg-zinc-950 text-white">
+    <aside className="flex h-full w-full flex-col bg-zinc-950 text-white">
+      {/* HEADER */}
       <div className="border-b border-zinc-800 px-4 py-6">
         <h1
           className={`font-bold tracking-tight ${
@@ -37,6 +46,7 @@ export default function Sidebar({ collapsed = false, onNavigate = () => {} }) {
         )}
       </div>
 
+      {/* NAV */}
       <nav className="flex-1 space-y-2 px-3 py-4">
         {navItems.map(({ to, label, icon: Icon }) => (
           <NavLink
@@ -59,6 +69,7 @@ export default function Sidebar({ collapsed = false, onNavigate = () => {} }) {
         ))}
       </nav>
 
+      {/* FOOTER */}
       <div className="border-t border-zinc-800 p-4">
         {!collapsed ? (
           <>
@@ -71,7 +82,7 @@ export default function Sidebar({ collapsed = false, onNavigate = () => {} }) {
 
             <button
               onClick={handleLogout}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-500"
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-500 active:scale-[0.98]"
             >
               <LogOut size={18} />
               Cerrar sesión
@@ -80,12 +91,12 @@ export default function Sidebar({ collapsed = false, onNavigate = () => {} }) {
         ) : (
           <button
             onClick={handleLogout}
-            className="flex w-full items-center justify-center rounded-2xl bg-red-600 px-3 py-3 text-white transition hover:bg-red-500"
+            className="flex w-full items-center justify-center rounded-2xl bg-red-600 px-3 py-3 text-white transition hover:bg-red-500 active:scale-[0.98]"
           >
             <LogOut size={18} />
           </button>
         )}
       </div>
-    </div>
+    </aside>
   );
 }
