@@ -351,21 +351,20 @@ export default function InventoryDetailPage() {
       setError('');
       setSuccess('');
 
+      // Normaliza los items actuales
       const normalizedItems = items.map((item) => normalizeItem(item));
 
-      const savedInventory = await saveInventoryDetail(
-        inventory.id,
-        normalizedItems,
-        notes
-      );
+      // Envía la actualización a la base de datos
+      await saveInventoryDetail(inventory.id, normalizedItems, notes);
 
-      const refreshedItems = Array.isArray(savedInventory.items)
-        ? savedInventory.items.map(normalizeItem)
-        : [];
+      // Actualiza el estado local con los items normalizados (conserva countEntries)
+      setInventory((prev) => ({
+        ...prev,
+        items: normalizedItems,
+        notes,
+      }));
+      setItems(normalizedItems);
 
-      setInventory(savedInventory);
-      setItems(refreshedItems);
-      setNotes(savedInventory.notes || '');
       setSuccess('Inventario actualizado correctamente.');
     } catch (err) {
       console.error(err);
