@@ -11,6 +11,7 @@ import {
   serverTimestamp,
   updateDoc,
   where,
+  onSnapshot, // Se importa onSnapshot para escuchar cambios en tiempo real
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -21,7 +22,6 @@ const productsRef = collection(db, 'products');
 /* =========================
    UTILIDADES
 ========================= */
-
 function safeString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -39,6 +39,7 @@ function safeNumber(value) {
    INVENTARIOS
 ========================= */
 
+// Obtiene todos los inventarios (ordenados por fecha)
 export async function getAllInventories() {
   const q = query(inventoriesRef, orderBy('dateKey', 'desc'));
   const snapshot = await getDocs(q);
@@ -49,6 +50,7 @@ export async function getAllInventories() {
   }));
 }
 
+// Obtiene un inventario por ID (lectura puntual)
 export async function getInventoryById(inventoryId) {
   if (!inventoryId) return null;
 
@@ -65,6 +67,7 @@ export async function getInventoryById(inventoryId) {
   };
 }
 
+// Obtiene el inventario de una fecha específica (lectura puntual)
 export async function getInventoryByDate(dateKey) {
   const normalizedDateKey = safeString(dateKey);
 
@@ -92,6 +95,7 @@ export async function getInventoryByDate(dateKey) {
   };
 }
 
+// Crea un nuevo inventario
 export async function createInventory(data) {
   const payload = {
     date: safeString(data.date),
@@ -122,6 +126,7 @@ export async function createInventory(data) {
   return docRef.id;
 }
 
+// Actualiza un inventario existente (campo a campo)
 export async function updateInventory(inventoryId, data) {
   const normalizedId = safeString(inventoryId);
 
@@ -158,6 +163,7 @@ export async function updateInventory(inventoryId, data) {
   await updateDoc(ref, payload);
 }
 
+// Guarda un inventario proveniente de un PDF. Si ya existe un inventario con la misma fecha, lo actualiza.
 export async function saveDailyInventoryFromPdf(
   parsedInventory,
   userEmail = ''
@@ -201,6 +207,10 @@ export async function saveDailyInventoryFromPdf(
   return await getInventoryById(newInventoryId);
 }
 
+/**
+ * Guarda los detalles de inventario (incluyendo countEntries) y conserva notas.
+ * Almacena los conteos en el campo "countEntries" para cada producto.
+ */
 export async function saveInventoryDetail(inventoryId, items, notes = '') {
   const currentInventory = await getInventoryById(inventoryId);
 
@@ -208,6 +218,7 @@ export async function saveInventoryDetail(inventoryId, items, notes = '') {
     throw new Error('Inventario no encontrado.');
   }
 
+  // Normaliza cada item y conserva su historial de conteos
   const normalizedItems = safeArray(items).map((item) => {
     const expectedQuantity = safeNumber(item.expectedQuantity);
     const unavailableQuantity = safeNumber(item.unavailableQuantity);
@@ -230,6 +241,22 @@ export async function saveInventoryDetail(inventoryId, items, notes = '') {
         ? ''
         : safeNumber(item.difference);
 
+    // Sanitizamos countEntries para incluir todos los conteos
+    const countEntries = safeArray(item.countEntries).map((entry) => ({
+      id:
+        safeString(entry.id) ||
+        `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      quantity:
+        entry.quantity === '' ||
+        entry.quantity === null ||
+        entry.quantity === undefined
+          ? 0
+          : safeNumber(entry.quantity),
+      comment: safeString(entry.comment),
+      observationType: safeString(entry.observationType) || 'Buen estado',
+      createdAt: safeString(entry.createdAt),
+    }));
+
     return {
       productName: safeString(item.productName),
       categoryName: safeString(item.categoryName),
@@ -244,6 +271,7 @@ export async function saveInventoryDetail(inventoryId, items, notes = '') {
       difference,
       observation: safeString(item.observation),
       status: safeString(item.status) || 'OK',
+      countEntries, // Conservamos los conteos en la BD
     };
   });
 
@@ -257,9 +285,80 @@ export async function saveInventoryDetail(inventoryId, items, notes = '') {
 }
 
 /* =========================
-   CATEGORÍAS
+   SUSCRIPCIONES EN TIEMPO REAL
 ========================= */
 
+/**
+ * Escucha cambios en todos los inventarios. Devuelve una función para cancelar.
+ * @param {(inventories: any[]) => void} callback
+ */
+export function subscribeAllInventories(callback) {
+  const q = query(inventoriesRef, orderBy('dateKey', 'desc'));
+  return onSnapshot(q, (snapshot) => {
+    const inventories = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+    callback(inventories);
+  });
+}
+
+/**
+ * Escucha cambios en un inventario por id. Devuelve una función para cancelar.
+ * @param {string} inventoryId
+ * @param {(data: any|null) => void} callback
+ */
+export function subscribeInventoryById(inventoryId, callback) {
+  const normalizedId = safeString(inventoryId);
+  if (!normalizedId) {
+    callback(null);
+    return () => {};
+  }
+  const ref = doc(db, 'inventories', normalizedId);
+  return onSnapshot(ref, (snapshot) => {
+    if (!snapshot.exists()) {
+      callback(null);
+      return;
+    }
+    callback({
+      id: snapshot.id,
+      ...snapshot.data(),
+    });
+  });
+}
+
+/**
+ * Escucha el inventario de una fecha específica (por dateKey). Devuelve una función para cancelar.
+ * @param {string} dateKey
+ * @param {(data: any|null) => void} callback
+ */
+export function subscribeInventoryByDate(dateKey, callback) {
+  const normalizedDateKey = safeString(dateKey);
+  if (!normalizedDateKey) {
+    callback(null);
+    return () => {};
+  }
+  const q = query(
+    inventoriesRef,
+    where('dateKey', '==', normalizedDateKey),
+    limit(1)
+  );
+  return onSnapshot(q, (snapshot) => {
+    if (snapshot.empty) {
+      callback(null);
+      return;
+    }
+    const docSnapshot = snapshot.docs[0];
+    callback({
+      id: docSnapshot.id,
+      ...docSnapshot.data(),
+    });
+  });
+}
+
+/* =========================
+   CATEGORÍAS
+========================= */
 export async function getCategories() {
   const q = query(categoriesRef, orderBy('name', 'asc'));
   const snapshot = await getDocs(q);
@@ -300,7 +399,6 @@ export async function deleteCategory(categoryId) {
 /* =========================
    PRODUCTOS
 ========================= */
-
 export async function getProducts() {
   const q = query(productsRef, orderBy('name', 'asc'));
   const snapshot = await getDocs(q);

@@ -12,9 +12,9 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { parseInventoryPdf } from '../services/pdfInventoryParser';
 import {
-  getAllInventories,
-  getInventoryByDate,
   saveDailyInventoryFromPdf,
+  subscribeInventoryByDate,
+  subscribeAllInventories,
 } from '../services/inventory';
 
 function getTodayDateKey() {
@@ -22,7 +22,6 @@ function getTodayDateKey() {
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
-
   return `${year}-${month}-${day}`;
 }
 
@@ -35,7 +34,6 @@ function formatDateLabelFromKey(dateKey) {
   const safeDay = day || 1;
 
   const date = new Date(safeYear, safeMonth - 1, safeDay);
-
   return new Intl.DateTimeFormat('es-MX', {
     day: 'numeric',
     month: 'long',
@@ -74,34 +72,32 @@ export default function InventoryDayPage() {
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
 
-  async function loadData() {
-    try {
-      setLoading(true);
-      setError('');
-
-      const [todayData, allData] = await Promise.all([
-        getInventoryByDate(todayDateKey),
-        getAllInventories(),
-      ]);
-
-      setTodayInventory(todayData);
-      setAllInventories(allData);
-    } catch (err) {
-      console.error(err);
-      setError('No se pudo cargar la información del inventario.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  // Suscripciones en tiempo real al inventario del día y al historial
   useEffect(() => {
-    loadData();
+    // Mostramos loading hasta que llegue la primera actualización del inventario de hoy
+    setLoading(true);
+
+    const unsubscribeToday = subscribeInventoryByDate(
+      todayDateKey,
+      (inventory) => {
+        setTodayInventory(inventory);
+        setLoading(false);
+      }
+    );
+
+    const unsubscribeAll = subscribeAllInventories((inventories) => {
+      setAllInventories(inventories);
+    });
+
+    return () => {
+      unsubscribeToday();
+      unsubscribeAll();
+    };
   }, [todayDateKey]);
 
   const filteredItems = useMemo(() => {
     const items = todayInventory?.items || [];
     const term = search.trim().toLowerCase();
-
     if (!term) return items;
 
     return items.filter((item) => {
@@ -115,7 +111,6 @@ export default function InventoryDayPage() {
 
   const stats = useMemo(() => {
     const items = todayInventory?.items || [];
-
     return {
       totalProducts: items.length,
       faltantes: items.filter((item) => item.status === 'FALTANTE').length,
@@ -138,7 +133,6 @@ export default function InventoryDayPage() {
 
   const handleFileChange = async (event) => {
     const selectedFile = event.target.files?.[0];
-
     if (!selectedFile) return;
 
     setUploading(true);
@@ -152,13 +146,12 @@ export default function InventoryDayPage() {
         user?.email || ''
       );
 
+      // Actualizamos el inventario localmente para mostrar feedback inmediato;
+      // luego la suscripción lo volverá a sincronizar si algo cambia en Firestore
       setTodayInventory(savedInventory);
       setSuccess(
         `Inventario del ${parsedInventory.dateLabel} cargado correctamente.`
       );
-
-      const freshHistory = await getAllInventories();
-      setAllInventories(freshHistory);
     } catch (err) {
       console.error(err);
       setError(err.message || 'No se pudo procesar el PDF.');
@@ -220,7 +213,6 @@ export default function InventoryDayPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-blue-400">
               <CalendarDays size={22} />
             </div>
-
             <div>
               <p className="text-sm text-zinc-400">Hoy</p>
               <h2 className="mt-2 text-2xl font-bold text-white">
@@ -235,7 +227,6 @@ export default function InventoryDayPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-emerald-400">
               <ClipboardList size={22} />
             </div>
-
             <div>
               <p className="text-sm text-zinc-400">Inventario de hoy</p>
               <h2 className="mt-2 text-2xl font-bold text-white">
@@ -254,7 +245,6 @@ export default function InventoryDayPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-yellow-400">
               <Boxes size={22} />
             </div>
-
             <div>
               <p className="text-sm text-zinc-400">Categorías del inventario</p>
               <h2 className="mt-2 text-2xl font-bold text-white">
@@ -269,7 +259,6 @@ export default function InventoryDayPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-zinc-300">
               <Package size={22} />
             </div>
-
             <div className="min-w-0">
               <p className="text-sm text-zinc-400">Usuario actual</p>
               <h2 className="mt-2 break-all text-lg font-bold text-white">
@@ -319,35 +308,30 @@ export default function InventoryDayPage() {
                   {todayInventory.date || 'Sin fecha'}
                 </p>
               </div>
-
               <div className="rounded-2xl border border-zinc-800 bg-black p-4">
                 <p className="text-sm text-zinc-400">Semana</p>
                 <p className="mt-2 font-semibold text-white">
                   {todayInventory.week || 'Sin semana'}
                 </p>
               </div>
-
               <div className="rounded-2xl border border-zinc-800 bg-black p-4">
                 <p className="text-sm text-zinc-400">Cedis</p>
                 <p className="mt-2 font-semibold text-white">
                   {todayInventory.cedis || 'Sin cedis'}
                 </p>
               </div>
-
               <div className="rounded-2xl border border-zinc-800 bg-black p-4">
                 <p className="text-sm text-zinc-400">Productos</p>
                 <p className="mt-2 font-semibold text-white">
                   {stats.totalProducts}
                 </p>
               </div>
-
               <div className="rounded-2xl border border-zinc-800 bg-black p-4">
                 <p className="text-sm text-zinc-400">Stock esperado</p>
                 <p className="mt-2 font-semibold text-white">
                   {stats.totalStockEsperado.toLocaleString('es-MX')}
                 </p>
               </div>
-
               <div className="rounded-2xl border border-zinc-800 bg-black p-4">
                 <p className="text-sm text-zinc-400">No disponible</p>
                 <p className="mt-2 font-semibold text-white">
@@ -361,14 +345,12 @@ export default function InventoryDayPage() {
                 <p className="text-sm text-emerald-400">OK</p>
                 <p className="mt-2 text-2xl font-bold text-white">{stats.ok}</p>
               </div>
-
               <div className="rounded-2xl border border-yellow-900/60 bg-yellow-950/40 p-4">
                 <p className="text-sm text-yellow-400">Alerta</p>
                 <p className="mt-2 text-2xl font-bold text-white">
                   {stats.alerta}
                 </p>
               </div>
-
               <div className="rounded-2xl border border-red-900/60 bg-red-950/40 p-4">
                 <p className="text-sm text-red-400">Faltantes</p>
                 <p className="mt-2 text-2xl font-bold text-white">

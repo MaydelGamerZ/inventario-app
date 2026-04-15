@@ -11,7 +11,10 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import { getInventoryById, saveInventoryDetail } from '../services/inventory';
+import {
+  subscribeInventoryById,
+  saveInventoryDetail,
+} from '../services/inventory';
 
 const OBSERVATION_OPTIONS = [
   'Buen estado',
@@ -43,14 +46,12 @@ function sumCountEntries(entries = []) {
 
 function summarizeEntriesByObservation(entries = []) {
   const summary = {};
-
   for (const entry of entries) {
     const observation =
       String(entry.observationType || 'Buen estado').trim() || 'Buen estado';
     summary[observation] =
       (summary[observation] || 0) + safeNumber(entry.quantity);
   }
-
   return summary;
 }
 
@@ -144,10 +145,10 @@ function getProductStateTags(item) {
       });
     }
   }
-
   return tags;
 }
 
+// Normaliza un item de Firestore para uso en el frontend
 function normalizeItem(item) {
   const countEntries = Array.isArray(item.countEntries)
     ? item.countEntries
@@ -172,7 +173,6 @@ function normalizeItem(item) {
   };
 
   normalized.status = item.status || calculateStatus(normalized);
-
   return normalized;
 }
 
@@ -186,23 +186,22 @@ export default function InventoryDetailPage() {
   const [search, setSearch] = useState('');
   const [expandedItems, setExpandedItems] = useState({});
   const [entryDrafts, setEntryDrafts] = useState({});
-
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  async function loadInventory() {
-    try {
-      setLoading(true);
-      setError('');
-      setSuccess('');
+  // Suscripción en tiempo real al inventario por id
+  useEffect(() => {
+    setLoading(true);
 
-      const inventoryData = await getInventoryById(id);
-
+    const unsubscribe = subscribeInventoryById(id, (inventoryData) => {
       if (!inventoryData) {
         setInventory(null);
         setItems([]);
+        setNotes('');
+        setExpandedItems({});
+        setLoading(false);
         return;
       }
 
@@ -219,21 +218,14 @@ export default function InventoryDetailPage() {
         initialExpanded[index] = index === 0;
       });
       setExpandedItems(initialExpanded);
-    } catch (err) {
-      console.error(err);
-      setError('No se pudo cargar el inventario.');
-    } finally {
       setLoading(false);
-    }
-  }
+    });
 
-  useEffect(() => {
-    loadInventory();
+    return () => unsubscribe();
   }, [id]);
 
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
-
     if (!term) return items;
 
     return items.filter((item) => {
@@ -343,6 +335,7 @@ export default function InventoryDetailPage() {
     }));
   };
 
+  // Guarda el inventario sin sobreescribir los conteos
   const handleSave = async () => {
     if (!inventory?.id) return;
 
@@ -351,13 +344,11 @@ export default function InventoryDetailPage() {
       setError('');
       setSuccess('');
 
-      // Normaliza los items actuales
       const normalizedItems = items.map((item) => normalizeItem(item));
 
-      // Envía la actualización a la base de datos
       await saveInventoryDetail(inventory.id, normalizedItems, notes);
 
-      // Actualiza el estado local con los items normalizados (conserva countEntries)
+      // Actualizamos el estado local inmediatamente.
       setInventory((prev) => ({
         ...prev,
         items: normalizedItems,
@@ -392,7 +383,6 @@ export default function InventoryDetailPage() {
           <p className="mt-2 text-zinc-400">
             No existe un inventario con ese identificador.
           </p>
-
           <div className="mt-5">
             <Link
               to="/inventario-diario"
@@ -419,7 +409,6 @@ export default function InventoryDetailPage() {
               >
                 <ArrowLeft size={18} />
               </button>
-
               <div>
                 <p className="text-sm font-medium text-blue-400">
                   Detalle de inventario
@@ -429,13 +418,11 @@ export default function InventoryDetailPage() {
                 </h1>
               </div>
             </div>
-
             <p className="text-sm leading-7 text-zinc-400">
               Cada producto puede tener varios conteos y cada conteo se
               clasifica por observación.
             </p>
           </div>
-
           <button
             onClick={handleSave}
             disabled={saving}
@@ -452,7 +439,6 @@ export default function InventoryDetailPage() {
           {error}
         </div>
       )}
-
       {success && (
         <div className="rounded-2xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
           {success}
@@ -466,21 +452,18 @@ export default function InventoryDetailPage() {
             {inventory.date || 'Sin fecha'}
           </p>
         </div>
-
         <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
           <p className="text-sm text-zinc-400">Semana</p>
           <p className="mt-2 text-xl font-semibold text-white">
             {inventory.week || 'Sin semana'}
           </p>
         </div>
-
         <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
           <p className="text-sm text-zinc-400">Cedis</p>
           <p className="mt-2 text-xl font-semibold text-white">
             {inventory.cedis || 'Sin cedis'}
           </p>
         </div>
-
         <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
           <p className="text-sm text-zinc-400">Estado</p>
           <p className="mt-2 text-xl font-semibold text-emerald-400">
@@ -492,34 +475,35 @@ export default function InventoryDetailPage() {
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
           <p className="text-sm text-zinc-400">Total</p>
-          <p className="mt-2 text-2xl font-bold text-white">{summary.total}</p>
+          <p className="mt-1 text-2xl font-semibold text-white">
+            {summary.total}
+          </p>
         </div>
-
         <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 p-4">
           <p className="text-sm text-emerald-400">OK</p>
-          <p className="mt-2 text-2xl font-bold text-white">{summary.ok}</p>
+          <p className="mt-1 text-2xl font-semibold text-white">{summary.ok}</p>
         </div>
-
         <div className="rounded-2xl border border-yellow-900/60 bg-yellow-950/40 p-4">
           <p className="text-sm text-yellow-400">Alerta</p>
-          <p className="mt-2 text-2xl font-bold text-white">{summary.alerta}</p>
+          <p className="mt-1 text-2xl font-semibold text-white">
+            {summary.alerta}
+          </p>
         </div>
-
         <div className="rounded-2xl border border-red-900/60 bg-red-950/40 p-4">
           <p className="text-sm text-red-400">Faltantes</p>
-          <p className="mt-2 text-2xl font-bold text-white">
+          <p className="mt-1 text-2xl font-semibold text-white">
             {summary.faltante}
           </p>
         </div>
-
         <div className="rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
           <p className="text-sm text-zinc-300">Dañados</p>
-          <p className="mt-2 text-2xl font-bold text-white">{summary.danado}</p>
+          <p className="mt-1 text-2xl font-semibold text-white">
+            {summary.danado}
+          </p>
         </div>
-
         <div className="rounded-2xl border border-orange-900/60 bg-orange-950/40 p-4">
           <p className="text-sm text-orange-400">Caducados</p>
-          <p className="mt-2 text-2xl font-bold text-white">
+          <p className="mt-1 text-2xl font-semibold text-white">
             {summary.caducado}
           </p>
         </div>
@@ -551,6 +535,7 @@ export default function InventoryDetailPage() {
             </div>
           ) : (
             filteredItems.map((item) => {
+              // Encontramos el índice real en la lista original para que los drafts coincidan
               const realIndex = items.findIndex(
                 (sourceItem) =>
                   sourceItem.productName === item.productName &&
@@ -587,7 +572,6 @@ export default function InventoryDetailPage() {
                       <p className="mt-1 text-xs text-zinc-500">
                         {item.supplierName}
                       </p>
-
                       <div className="mt-3 flex flex-wrap gap-2">
                         {stateTags.map((tag) => (
                           <span
@@ -602,7 +586,6 @@ export default function InventoryDetailPage() {
                         ))}
                       </div>
                     </div>
-
                     <div className="ml-4 flex items-center gap-3">
                       {isExpanded ? (
                         <ChevronUp size={18} className="text-zinc-400" />
@@ -623,7 +606,6 @@ export default function InventoryDetailPage() {
                             {item.expectedQuantity.toLocaleString('es-MX')}
                           </span>
                         </div>
-
                         <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
                           <span className="block text-xs text-zinc-500">
                             No disponible
@@ -632,7 +614,6 @@ export default function InventoryDetailPage() {
                             {item.unavailableQuantity.toLocaleString('es-MX')}
                           </span>
                         </div>
-
                         <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
                           <span className="block text-xs text-zinc-500">
                             Contado acumulado
@@ -641,7 +622,6 @@ export default function InventoryDetailPage() {
                             {item.countedQuantity.toLocaleString('es-MX')}
                           </span>
                         </div>
-
                         <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
                           <span className="block text-xs text-zinc-500">
                             Diferencia
@@ -656,7 +636,6 @@ export default function InventoryDetailPage() {
                         <p className="mb-3 text-sm font-semibold text-white">
                           Agregar conteo
                         </p>
-
                         <div className="grid gap-3 md:grid-cols-[140px_1fr_220px_auto]">
                           <input
                             type="number"
@@ -671,7 +650,6 @@ export default function InventoryDetailPage() {
                             placeholder="Cantidad"
                             className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
                           />
-
                           <input
                             type="text"
                             value={draft.comment}
@@ -685,7 +663,6 @@ export default function InventoryDetailPage() {
                             placeholder="Comentario: tarima A, exhibición, pasillo..."
                             className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
                           />
-
                           <select
                             value={draft.observationType}
                             onChange={(e) =>
@@ -703,7 +680,6 @@ export default function InventoryDetailPage() {
                               </option>
                             ))}
                           </select>
-
                           <button
                             onClick={() => handleAddCountEntry(realIndex)}
                             className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500"
@@ -718,7 +694,6 @@ export default function InventoryDetailPage() {
                         <p className="mb-2 text-sm font-semibold text-white">
                           Resumen por observación
                         </p>
-
                         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                           {OBSERVATION_OPTIONS.filter(
                             (option) => (observationTotals[option] || 0) > 0
@@ -752,7 +727,6 @@ export default function InventoryDetailPage() {
                         <p className="text-sm font-semibold text-white">
                           Historial de conteos
                         </p>
-
                         {!item.countEntries ||
                         item.countEntries.length === 0 ? (
                           <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-400">
@@ -779,7 +753,6 @@ export default function InventoryDetailPage() {
                                   {entry.createdAt || 'Sin fecha'}
                                 </p>
                               </div>
-
                               <button
                                 onClick={() =>
                                   handleDeleteCountEntry(realIndex, entry.id)
@@ -807,7 +780,6 @@ export default function InventoryDetailPage() {
           <AlertTriangle size={18} className="text-yellow-400" />
           <h2 className="text-xl font-bold text-white">Notas generales</h2>
         </div>
-
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
