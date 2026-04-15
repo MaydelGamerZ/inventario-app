@@ -98,6 +98,56 @@ function getStatusColor(status) {
   }
 }
 
+function getObservationBadgeColor(label) {
+  switch (label) {
+    case 'Buen estado':
+      return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
+    case 'Dañado':
+      return 'border-zinc-700 bg-zinc-900 text-zinc-300';
+    case 'Caducado':
+      return 'border-orange-900/60 bg-orange-950/50 text-orange-400';
+    case 'Exhibición':
+      return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
+    case 'Maltratado':
+      return 'border-red-900/60 bg-red-950/50 text-red-400';
+    case 'Otro':
+      return 'border-blue-900/60 bg-blue-950/50 text-blue-400';
+    default:
+      return 'border-zinc-800 bg-zinc-900 text-zinc-300';
+  }
+}
+
+function getProductStateTags(item) {
+  const observationTotals = item.observationTotals || {};
+  const tags = [];
+
+  for (const option of OBSERVATION_OPTIONS) {
+    const qty = safeNumber(observationTotals[option] || 0);
+    if (qty > 0) {
+      tags.push({
+        label: option,
+        quantity: qty,
+      });
+    }
+  }
+
+  if (tags.length === 0) {
+    if (safeNumber(item.unavailableQuantity) > 0) {
+      tags.push({
+        label: 'No disponible',
+        quantity: safeNumber(item.unavailableQuantity),
+      });
+    } else {
+      tags.push({
+        label: item.status || 'OK',
+        quantity: safeNumber(item.countedQuantity || 0),
+      });
+    }
+  }
+
+  return tags;
+}
+
 function normalizeItem(item) {
   const countEntries = Array.isArray(item.countEntries)
     ? item.countEntries
@@ -121,7 +171,7 @@ function normalizeItem(item) {
     observationTotals,
   };
 
-  normalized.status = calculateStatus(normalized);
+  normalized.status = item.status || calculateStatus(normalized);
 
   return normalized;
 }
@@ -382,8 +432,8 @@ export default function InventoryDetailPage() {
             </div>
 
             <p className="text-sm leading-7 text-zinc-400">
-              Cada producto puede tener varios conteos. Cada conteo suma al
-              total y además se clasifica por observación.
+              Cada producto puede tener varios conteos y cada conteo se
+              clasifica por observación.
             </p>
           </div>
 
@@ -517,6 +567,7 @@ export default function InventoryDetailPage() {
 
               const isExpanded = !!expandedItems[realIndex];
               const observationTotals = item.observationTotals || {};
+              const stateTags = getProductStateTags(item);
 
               return (
                 <div
@@ -537,17 +588,23 @@ export default function InventoryDetailPage() {
                       <p className="mt-1 text-xs text-zinc-500">
                         {item.supplierName}
                       </p>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {stateTags.map((tag) => (
+                          <span
+                            key={`${tag.label}-${tag.quantity}`}
+                            className={`inline-flex items-center rounded-xl border px-3 py-1 text-xs font-medium ${getObservationBadgeColor(
+                              tag.label
+                            )}`}
+                          >
+                            {tag.label} ·{' '}
+                            {safeNumber(tag.quantity).toLocaleString('es-MX')}
+                          </span>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="ml-4 flex items-center gap-3">
-                      <span
-                        className={`inline-flex items-center rounded-xl border px-3 py-1 text-sm font-medium ${getStatusColor(
-                          item.status
-                        )}`}
-                      >
-                        {item.status}
-                      </span>
-
                       {isExpanded ? (
                         <ChevronUp size={18} className="text-zinc-400" />
                       ) : (
