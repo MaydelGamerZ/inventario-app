@@ -164,6 +164,7 @@ export default function InventoryDetailPage() {
 
       await updateInventory(inventory.id, {
         date: inventory.date || '',
+        dateKey: inventory.dateKey || '',
         status: inventory.status || 'Abierto',
         cedis: inventory.cedis || '',
         week: inventory.week || '',

@@ -95,6 +95,8 @@ export async function getAllInventories() {
 }
 
 export async function getInventoryById(inventoryId) {
+  if (!inventoryId) return null;
+
   const ref = doc(db, 'inventories', inventoryId);
   const snapshot = await getDoc(ref);
 
@@ -108,8 +110,22 @@ export async function getInventoryById(inventoryId) {
   };
 }
 
-export async function getInventoryByDate(date) {
-  const q = query(inventoriesRef, where('date', '==', date), limit(1));
+export async function getInventoryByDate(dateKey) {
+  if (!dateKey || typeof dateKey !== 'string') {
+    return null;
+  }
+
+  const normalizedDateKey = dateKey.trim();
+
+  if (!normalizedDateKey) {
+    return null;
+  }
+
+  const q = query(
+    inventoriesRef,
+    where('dateKey', '==', normalizedDateKey),
+    limit(1)
+  );
 
   const snapshot = await getDocs(q);
 
@@ -128,6 +144,7 @@ export async function getInventoryByDate(date) {
 export async function createInventory(data) {
   const payload = {
     date: data.date || '',
+    dateKey: data.dateKey || '',
     status: data.status || 'Abierto',
     cedis: data.cedis || '',
     week: data.week || '',
@@ -144,14 +161,19 @@ export async function createInventory(data) {
 }
 
 export async function createTodayInventory(data) {
-  const existingInventory = await getInventoryByDate(data.date);
+  if (!data?.dateKey) {
+    throw new Error('No se recibió una fecha válida para crear el inventario.');
+  }
+
+  const existingInventory = await getInventoryByDate(data.dateKey);
 
   if (existingInventory) {
     return existingInventory;
   }
 
   const newInventoryId = await createInventory({
-    date: data.date,
+    date: data.date || '',
+    dateKey: data.dateKey,
     status: data.status || 'Abierto',
     cedis: data.cedis || '',
     week: data.week || '',
@@ -166,10 +188,15 @@ export async function createTodayInventory(data) {
 }
 
 export async function updateInventory(inventoryId, data) {
+  if (!inventoryId) {
+    throw new Error('No se recibió el id del inventario.');
+  }
+
   const ref = doc(db, 'inventories', inventoryId);
 
   await updateDoc(ref, {
     date: data.date || '',
+    dateKey: data.dateKey || '',
     status: data.status || 'Abierto',
     cedis: data.cedis || '',
     week: data.week || '',
