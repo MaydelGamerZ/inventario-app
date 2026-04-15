@@ -8,8 +8,19 @@ import {
   ClipboardList,
   Plus,
   Trash2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { getInventoryById, saveInventoryDetail } from '../services/inventory';
+
+const OBSERVATION_OPTIONS = [
+  'Buen estado',
+  'Dañado',
+  'Caducado',
+  'Exhibición',
+  'Maltratado',
+  'Otro',
+];
 
 function formatNow() {
   return new Date().toLocaleString('es-MX', {
@@ -30,24 +41,43 @@ function sumCountEntries(entries = []) {
   return entries.reduce((sum, entry) => sum + safeNumber(entry.quantity), 0);
 }
 
+function summarizeEntriesByObservation(entries = []) {
+  const summary = {};
+
+  for (const entry of entries) {
+    const observation =
+      String(entry.observationType || 'Buen estado').trim() || 'Buen estado';
+    summary[observation] =
+      (summary[observation] || 0) + safeNumber(entry.quantity);
+  }
+
+  return summary;
+}
+
 function calculateDifference(expectedQuantity, countedQuantity) {
   return safeNumber(countedQuantity) - safeNumber(expectedQuantity);
 }
 
 function calculateStatus(item) {
-  const observation = String(item.observation || '')
-    .toLowerCase()
-    .trim();
+  const observationSummary = summarizeEntriesByObservation(
+    item.countEntries || []
+  );
+  const counted = safeNumber(item.countedQuantity);
   const expected = safeNumber(item.expectedQuantity);
   const unavailable = safeNumber(item.unavailableQuantity);
-  const counted = safeNumber(item.countedQuantity);
 
-  if (observation.includes('caduc')) return 'CADUCADO';
-  if (observation.includes('dañ') || observation.includes('dan'))
-    return 'DAÑADO';
   if (counted <= 0) return 'FALTANTE';
+  if ((observationSummary.Caducado || 0) > 0) return 'CADUCADO';
+  if (
+    (observationSummary.Dañado || 0) > 0 ||
+    (observationSummary.Maltratado || 0) > 0
+  ) {
+    return 'DAÑADO';
+  }
+  if (unavailable > 0 || (observationSummary.Exhibición || 0) > 0)
+    return 'ALERTA';
   if (expected <= 0) return 'FALTANTE';
-  if (unavailable > 0) return 'ALERTA';
+
   return 'OK';
 }
 
@@ -72,36 +102,26 @@ function normalizeItem(item) {
   const countEntries = Array.isArray(item.countEntries)
     ? item.countEntries
     : [];
-
-  const countedQuantity =
-    item.countedQuantity !== undefined &&
-    item.countedQuantity !== null &&
-    item.countedQuantity !== ''
-      ? safeNumber(item.countedQuantity)
-      : sumCountEntries(countEntries);
-
-  const difference =
-    item.difference !== undefined &&
-    item.difference !== null &&
-    item.difference !== ''
-      ? safeNumber(item.difference)
-      : calculateDifference(item.expectedQuantity, countedQuantity);
+  const countedQuantity = sumCountEntries(countEntries);
+  const difference = calculateDifference(
+    item.expectedQuantity,
+    countedQuantity
+  );
+  const observationTotals = summarizeEntriesByObservation(countEntries);
 
   const normalized = {
     ...item,
     expectedQuantity: safeNumber(item.expectedQuantity),
     unavailableQuantity: safeNumber(item.unavailableQuantity),
     countedQuantity,
-    total:
-      item.total !== undefined && item.total !== null && item.total !== ''
-        ? safeNumber(item.total)
-        : countedQuantity,
+    total: countedQuantity,
     difference,
     observation: item.observation || '',
     countEntries,
+    observationTotals,
   };
 
-  normalized.status = item.status || calculateStatus(normalized);
+  normalized.status = calculateStatus(normalized);
 
   return normalized;
 }
@@ -114,7 +134,7 @@ export default function InventoryDetailPage() {
   const [items, setItems] = useState([]);
   const [notes, setNotes] = useState('');
   const [search, setSearch] = useState('');
-
+  const [expandedItems, setExpandedItems] = useState({});
   const [entryDrafts, setEntryDrafts] = useState({});
 
   const [loading, setLoading] = useState(true);
@@ -143,6 +163,12 @@ export default function InventoryDetailPage() {
       setInventory(inventoryData);
       setItems(normalizedItems);
       setNotes(inventoryData.notes || '');
+
+      const initialExpanded = {};
+      normalizedItems.forEach((_, index) => {
+        initialExpanded[index] = index === 0;
+      });
+      setExpandedItems(initialExpanded);
     } catch (err) {
       console.error(err);
       setError('No se pudo cargar el inventario.');
@@ -190,27 +216,10 @@ export default function InventoryDetailPage() {
           typeof updater === 'function'
             ? updater(item)
             : { ...item, ...updater };
-
-        const recountedQuantity = sumCountEntries(updated.countEntries || []);
-        updated.countedQuantity = recountedQuantity;
-        updated.total = recountedQuantity;
-        updated.difference = calculateDifference(
-          updated.expectedQuantity,
-          recountedQuantity
-        );
-        updated.status = calculateStatus(updated);
-
-        return updated;
+        return normalizeItem(updated);
       })
     );
   }
-
-  const handleObservationChange = (index, value) => {
-    updateItem(index, (item) => ({
-      ...item,
-      observation: value,
-    }));
-  };
 
   const handleDraftChange = (index, field, value) => {
     setEntryDrafts((prev) => ({
@@ -218,13 +227,19 @@ export default function InventoryDetailPage() {
       [index]: {
         quantity: prev[index]?.quantity || '',
         comment: prev[index]?.comment || '',
+        observationType: prev[index]?.observationType || 'Buen estado',
         [field]: value,
       },
     }));
   };
 
   const handleAddCountEntry = (index) => {
-    const draft = entryDrafts[index] || { quantity: '', comment: '' };
+    const draft = entryDrafts[index] || {
+      quantity: '',
+      comment: '',
+      observationType: 'Buen estado',
+    };
+
     const quantity = safeNumber(draft.quantity);
 
     if (quantity <= 0) {
@@ -243,6 +258,7 @@ export default function InventoryDetailPage() {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           quantity,
           comment: String(draft.comment || '').trim(),
+          observationType: String(draft.observationType || 'Buen estado'),
           createdAt: formatNow(),
         },
       ],
@@ -253,6 +269,7 @@ export default function InventoryDetailPage() {
       [index]: {
         quantity: '',
         comment: '',
+        observationType: 'Buen estado',
       },
     }));
   };
@@ -269,6 +286,13 @@ export default function InventoryDetailPage() {
     }));
   };
 
+  const toggleExpanded = (index) => {
+    setExpandedItems((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  };
+
   const handleSave = async () => {
     if (!inventory?.id) return;
 
@@ -277,16 +301,7 @@ export default function InventoryDetailPage() {
       setError('');
       setSuccess('');
 
-      const normalizedItems = items.map((item) => {
-        const cleanItem = normalizeItem(item);
-        return {
-          ...cleanItem,
-          observation: String(cleanItem.observation || '').trim(),
-          countEntries: Array.isArray(cleanItem.countEntries)
-            ? cleanItem.countEntries
-            : [],
-        };
-      });
+      const normalizedItems = items.map((item) => normalizeItem(item));
 
       const savedInventory = await saveInventoryDetail(
         inventory.id,
@@ -367,8 +382,8 @@ export default function InventoryDetailPage() {
             </div>
 
             <p className="text-sm leading-7 text-zinc-400">
-              Cada producto puede tener varios conteos. El sistema suma los
-              conteos y te deja eliminar entradas individuales si te equivocas.
+              Cada producto puede tener varios conteos. Cada conteo suma al
+              total y además se clasifica por observación.
             </p>
           </div>
 
@@ -497,14 +512,21 @@ export default function InventoryDetailPage() {
               const draft = entryDrafts[realIndex] || {
                 quantity: '',
                 comment: '',
+                observationType: 'Buen estado',
               };
+
+              const isExpanded = !!expandedItems[realIndex];
+              const observationTotals = item.observationTotals || {};
 
               return (
                 <div
                   key={`${item.productName}-${item.categoryCode}-${item.supplierCode}-${realIndex}`}
-                  className="rounded-2xl border border-zinc-800 bg-black p-4"
+                  className="overflow-hidden rounded-2xl border border-zinc-800 bg-black"
                 >
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <button
+                    onClick={() => toggleExpanded(realIndex)}
+                    className="flex w-full items-center justify-between px-4 py-4 text-left transition hover:bg-zinc-950"
+                  >
                     <div className="min-w-0">
                       <p className="font-semibold text-white">
                         {item.productName}
@@ -517,153 +539,206 @@ export default function InventoryDetailPage() {
                       </p>
                     </div>
 
-                    <span
-                      className={`inline-flex items-center rounded-xl border px-3 py-1 text-sm font-medium ${getStatusColor(
-                        item.status
-                      )}`}
-                    >
-                      {item.status}
-                    </span>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                      <span className="block text-xs text-zinc-500">Stock</span>
-                      <span className="text-zinc-200">
-                        {item.expectedQuantity.toLocaleString('es-MX')}
-                      </span>
-                    </div>
-
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                      <span className="block text-xs text-zinc-500">
-                        No disponible
-                      </span>
-                      <span className="text-zinc-200">
-                        {item.unavailableQuantity.toLocaleString('es-MX')}
-                      </span>
-                    </div>
-
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                      <span className="block text-xs text-zinc-500">
-                        Contado acumulado
-                      </span>
-                      <span className="text-zinc-200">
-                        {item.countedQuantity.toLocaleString('es-MX')}
-                      </span>
-                    </div>
-
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                      <span className="block text-xs text-zinc-500">
-                        Diferencia
-                      </span>
-                      <span className="text-zinc-200">
-                        {item.difference.toLocaleString('es-MX')}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-                    <p className="mb-3 text-sm font-semibold text-white">
-                      Agregar conteo
-                    </p>
-
-                    <div className="grid gap-3 md:grid-cols-[160px_1fr_auto]">
-                      <input
-                        type="number"
-                        value={draft.quantity}
-                        onChange={(e) =>
-                          handleDraftChange(
-                            realIndex,
-                            'quantity',
-                            e.target.value
-                          )
-                        }
-                        placeholder="Cantidad"
-                        className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                      />
-
-                      <input
-                        type="text"
-                        value={draft.comment}
-                        onChange={(e) =>
-                          handleDraftChange(
-                            realIndex,
-                            'comment',
-                            e.target.value
-                          )
-                        }
-                        placeholder="Comentario: tarima A, exhibición, pasillo..."
-                        className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                      />
-
-                      <button
-                        onClick={() => handleAddCountEntry(realIndex)}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500"
+                    <div className="ml-4 flex items-center gap-3">
+                      <span
+                        className={`inline-flex items-center rounded-xl border px-3 py-1 text-sm font-medium ${getStatusColor(
+                          item.status
+                        )}`}
                       >
-                        <Plus size={16} />
-                        Agregar
-                      </button>
+                        {item.status}
+                      </span>
+
+                      {isExpanded ? (
+                        <ChevronUp size={18} className="text-zinc-400" />
+                      ) : (
+                        <ChevronDown size={18} className="text-zinc-400" />
+                      )}
                     </div>
-                  </div>
+                  </button>
 
-                  <div className="mt-4">
-                    <label className="mb-2 block text-xs text-zinc-500">
-                      Observación general del producto
-                    </label>
-                    <input
-                      type="text"
-                      value={item.observation || ''}
-                      onChange={(e) =>
-                        handleObservationChange(realIndex, e.target.value)
-                      }
-                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                      placeholder="Ej. dañado, caducado, exhibición, maltratado..."
-                    />
-                  </div>
+                  {isExpanded && (
+                    <div className="border-t border-zinc-800 px-4 py-4">
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <span className="block text-xs text-zinc-500">
+                            Stock
+                          </span>
+                          <span className="text-zinc-200">
+                            {item.expectedQuantity.toLocaleString('es-MX')}
+                          </span>
+                        </div>
 
-                  <div className="mt-4 space-y-2">
-                    <p className="text-sm font-semibold text-white">
-                      Historial de conteos
-                    </p>
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <span className="block text-xs text-zinc-500">
+                            No disponible
+                          </span>
+                          <span className="text-zinc-200">
+                            {item.unavailableQuantity.toLocaleString('es-MX')}
+                          </span>
+                        </div>
 
-                    {!item.countEntries || item.countEntries.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-400">
-                        Aún no hay conteos registrados para este producto.
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <span className="block text-xs text-zinc-500">
+                            Contado acumulado
+                          </span>
+                          <span className="text-zinc-200">
+                            {item.countedQuantity.toLocaleString('es-MX')}
+                          </span>
+                        </div>
+
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <span className="block text-xs text-zinc-500">
+                            Diferencia
+                          </span>
+                          <span className="text-zinc-200">
+                            {item.difference.toLocaleString('es-MX')}
+                          </span>
+                        </div>
                       </div>
-                    ) : (
-                      item.countEntries.map((entry) => (
-                        <div
-                          key={entry.id}
-                          className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 md:flex-row md:items-center md:justify-between"
-                        >
-                          <div className="min-w-0">
-                            <p className="font-medium text-white">
-                              +
-                              {safeNumber(entry.quantity).toLocaleString(
-                                'es-MX'
-                              )}
-                            </p>
-                            <p className="mt-1 text-sm text-zinc-400">
-                              {entry.comment || 'Sin comentario'}
-                            </p>
-                            <p className="mt-1 text-xs text-zinc-500">
-                              {entry.createdAt || 'Sin fecha'}
-                            </p>
-                          </div>
+
+                      <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                        <p className="mb-3 text-sm font-semibold text-white">
+                          Agregar conteo
+                        </p>
+
+                        <div className="grid gap-3 md:grid-cols-[140px_1fr_220px_auto]">
+                          <input
+                            type="number"
+                            value={draft.quantity}
+                            onChange={(e) =>
+                              handleDraftChange(
+                                realIndex,
+                                'quantity',
+                                e.target.value
+                              )
+                            }
+                            placeholder="Cantidad"
+                            className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
+                          />
+
+                          <input
+                            type="text"
+                            value={draft.comment}
+                            onChange={(e) =>
+                              handleDraftChange(
+                                realIndex,
+                                'comment',
+                                e.target.value
+                              )
+                            }
+                            placeholder="Comentario: tarima A, exhibición, pasillo..."
+                            className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
+                          />
+
+                          <select
+                            value={draft.observationType}
+                            onChange={(e) =>
+                              handleDraftChange(
+                                realIndex,
+                                'observationType',
+                                e.target.value
+                              )
+                            }
+                            className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
+                          >
+                            {OBSERVATION_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
 
                           <button
-                            onClick={() =>
-                              handleDeleteCountEntry(realIndex, entry.id)
-                            }
-                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-900 bg-red-950/40 px-4 py-2 font-medium text-red-300 transition hover:bg-red-900/40"
+                            onClick={() => handleAddCountEntry(realIndex)}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500"
                           >
-                            <Trash2 size={16} />
-                            Eliminar
+                            <Plus size={16} />
+                            Agregar
                           </button>
                         </div>
-                      ))
-                    )}
-                  </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <p className="mb-2 text-sm font-semibold text-white">
+                          Resumen por observación
+                        </p>
+
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          {OBSERVATION_OPTIONS.filter(
+                            (option) => (observationTotals[option] || 0) > 0
+                          ).length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-400">
+                              Aún no hay observaciones registradas.
+                            </div>
+                          ) : (
+                            OBSERVATION_OPTIONS.filter(
+                              (option) => (observationTotals[option] || 0) > 0
+                            ).map((option) => (
+                              <div
+                                key={option}
+                                className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3"
+                              >
+                                <span className="block text-xs text-zinc-500">
+                                  {option}
+                                </span>
+                                <span className="text-zinc-200">
+                                  {(
+                                    observationTotals[option] || 0
+                                  ).toLocaleString('es-MX')}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 space-y-2">
+                        <p className="text-sm font-semibold text-white">
+                          Historial de conteos
+                        </p>
+
+                        {!item.countEntries ||
+                        item.countEntries.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-400">
+                            Aún no hay conteos registrados para este producto.
+                          </div>
+                        ) : (
+                          item.countEntries.map((entry) => (
+                            <div
+                              key={entry.id}
+                              className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 md:flex-row md:items-center md:justify-between"
+                            >
+                              <div className="min-w-0">
+                                <p className="font-medium text-white">
+                                  +
+                                  {safeNumber(entry.quantity).toLocaleString(
+                                    'es-MX'
+                                  )}
+                                </p>
+                                <p className="mt-1 text-sm text-zinc-400">
+                                  {entry.comment || 'Sin comentario'}
+                                </p>
+                                <p className="mt-1 text-xs text-zinc-500">
+                                  {entry.observationType || 'Buen estado'} ·{' '}
+                                  {entry.createdAt || 'Sin fecha'}
+                                </p>
+                              </div>
+
+                              <button
+                                onClick={() =>
+                                  handleDeleteCountEntry(realIndex, entry.id)
+                                }
+                                className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-900 bg-red-950/40 px-4 py-2 font-medium text-red-300 transition hover:bg-red-900/40"
+                              >
+                                <Trash2 size={16} />
+                                Eliminar
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })
