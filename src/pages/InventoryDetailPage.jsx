@@ -6,50 +6,46 @@ import {
   Search,
   AlertTriangle,
   ClipboardList,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { getInventoryById, saveInventoryDetail } from '../services/inventory';
 
-function toDisplayNumber(value) {
-  if (value === '' || value === null || value === undefined) return '';
+function formatNow() {
+  return new Date().toLocaleString('es-MX', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function safeNumber(value) {
   const parsed = Number(value);
-  return Number.isNaN(parsed) ? '' : parsed;
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function sumCountEntries(entries = []) {
+  return entries.reduce((sum, entry) => sum + safeNumber(entry.quantity), 0);
 }
 
 function calculateDifference(expectedQuantity, countedQuantity) {
-  const expected = Number(expectedQuantity) || 0;
-
-  if (
-    countedQuantity === '' ||
-    countedQuantity === null ||
-    countedQuantity === undefined
-  ) {
-    return '';
-  }
-
-  const counted = Number(countedQuantity);
-  if (Number.isNaN(counted)) return '';
-
-  return counted - expected;
+  return safeNumber(countedQuantity) - safeNumber(expectedQuantity);
 }
 
 function calculateStatus(item) {
   const observation = String(item.observation || '')
     .toLowerCase()
     .trim();
-  const expected = Number(item.expectedQuantity) || 0;
-  const unavailable = Number(item.unavailableQuantity) || 0;
-  const counted =
-    item.countedQuantity === '' ||
-    item.countedQuantity === null ||
-    item.countedQuantity === undefined
-      ? null
-      : Number(item.countedQuantity);
+  const expected = safeNumber(item.expectedQuantity);
+  const unavailable = safeNumber(item.unavailableQuantity);
+  const counted = safeNumber(item.countedQuantity);
 
   if (observation.includes('caduc')) return 'CADUCADO';
   if (observation.includes('dañ') || observation.includes('dan'))
     return 'DAÑADO';
-  if (counted !== null && !Number.isNaN(counted) && counted <= 0)
-    return 'FALTANTE';
+  if (counted <= 0) return 'FALTANTE';
   if (expected <= 0) return 'FALTANTE';
   if (unavailable > 0) return 'ALERTA';
   return 'OK';
@@ -72,6 +68,44 @@ function getStatusColor(status) {
   }
 }
 
+function normalizeItem(item) {
+  const countEntries = Array.isArray(item.countEntries)
+    ? item.countEntries
+    : [];
+
+  const countedQuantity =
+    item.countedQuantity !== undefined &&
+    item.countedQuantity !== null &&
+    item.countedQuantity !== ''
+      ? safeNumber(item.countedQuantity)
+      : sumCountEntries(countEntries);
+
+  const difference =
+    item.difference !== undefined &&
+    item.difference !== null &&
+    item.difference !== ''
+      ? safeNumber(item.difference)
+      : calculateDifference(item.expectedQuantity, countedQuantity);
+
+  const normalized = {
+    ...item,
+    expectedQuantity: safeNumber(item.expectedQuantity),
+    unavailableQuantity: safeNumber(item.unavailableQuantity),
+    countedQuantity,
+    total:
+      item.total !== undefined && item.total !== null && item.total !== ''
+        ? safeNumber(item.total)
+        : countedQuantity,
+    difference,
+    observation: item.observation || '',
+    countEntries,
+  };
+
+  normalized.status = item.status || calculateStatus(normalized);
+
+  return normalized;
+}
+
 export default function InventoryDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -80,6 +114,8 @@ export default function InventoryDetailPage() {
   const [items, setItems] = useState([]);
   const [notes, setNotes] = useState('');
   const [search, setSearch] = useState('');
+
+  const [entryDrafts, setEntryDrafts] = useState({});
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -101,15 +137,7 @@ export default function InventoryDetailPage() {
       }
 
       const normalizedItems = Array.isArray(inventoryData.items)
-        ? inventoryData.items.map((item) => ({
-            ...item,
-            countedQuantity:
-              item.countedQuantity === undefined ? '' : item.countedQuantity,
-            total: item.total === undefined ? '' : item.total,
-            difference: item.difference === undefined ? '' : item.difference,
-            observation: item.observation || '',
-            status: item.status || calculateStatus(item),
-          }))
+        ? inventoryData.items.map(normalizeItem)
         : [];
 
       setInventory(inventoryData);
@@ -153,36 +181,92 @@ export default function InventoryDetailPage() {
     };
   }, [items]);
 
-  const handleItemChange = (index, field, value) => {
+  function updateItem(index, updater) {
     setItems((prev) =>
       prev.map((item, itemIndex) => {
         if (itemIndex !== index) return item;
 
-        const updatedItem = {
-          ...item,
-          [field]: value,
-        };
+        const updated =
+          typeof updater === 'function'
+            ? updater(item)
+            : { ...item, ...updater };
 
-        const nextDifference = calculateDifference(
-          updatedItem.expectedQuantity,
-          updatedItem.countedQuantity
+        const recountedQuantity = sumCountEntries(updated.countEntries || []);
+        updated.countedQuantity = recountedQuantity;
+        updated.total = recountedQuantity;
+        updated.difference = calculateDifference(
+          updated.expectedQuantity,
+          recountedQuantity
         );
+        updated.status = calculateStatus(updated);
 
-        updatedItem.difference = nextDifference;
-
-        if (
-          updatedItem.total === '' ||
-          updatedItem.total === null ||
-          updatedItem.total === undefined
-        ) {
-          updatedItem.total = updatedItem.countedQuantity;
-        }
-
-        updatedItem.status = calculateStatus(updatedItem);
-
-        return updatedItem;
+        return updated;
       })
     );
+  }
+
+  const handleObservationChange = (index, value) => {
+    updateItem(index, (item) => ({
+      ...item,
+      observation: value,
+    }));
+  };
+
+  const handleDraftChange = (index, field, value) => {
+    setEntryDrafts((prev) => ({
+      ...prev,
+      [index]: {
+        quantity: prev[index]?.quantity || '',
+        comment: prev[index]?.comment || '',
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleAddCountEntry = (index) => {
+    const draft = entryDrafts[index] || { quantity: '', comment: '' };
+    const quantity = safeNumber(draft.quantity);
+
+    if (quantity <= 0) {
+      setError('La cantidad del conteo debe ser mayor a cero.');
+      return;
+    }
+
+    setError('');
+    setSuccess('');
+
+    updateItem(index, (item) => ({
+      ...item,
+      countEntries: [
+        ...(item.countEntries || []),
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          quantity,
+          comment: String(draft.comment || '').trim(),
+          createdAt: formatNow(),
+        },
+      ],
+    }));
+
+    setEntryDrafts((prev) => ({
+      ...prev,
+      [index]: {
+        quantity: '',
+        comment: '',
+      },
+    }));
+  };
+
+  const handleDeleteCountEntry = (itemIndex, entryId) => {
+    setError('');
+    setSuccess('');
+
+    updateItem(itemIndex, (item) => ({
+      ...item,
+      countEntries: (item.countEntries || []).filter(
+        (entry) => entry.id !== entryId
+      ),
+    }));
   };
 
   const handleSave = async () => {
@@ -194,20 +278,13 @@ export default function InventoryDetailPage() {
       setSuccess('');
 
       const normalizedItems = items.map((item) => {
-        const countedQuantity =
-          item.countedQuantity === '' ? '' : Number(item.countedQuantity);
-
-        const total = item.total === '' ? '' : Number(item.total);
-        const difference =
-          item.difference === '' ? '' : Number(item.difference);
-
+        const cleanItem = normalizeItem(item);
         return {
-          ...item,
-          countedQuantity: Number.isNaN(countedQuantity) ? '' : countedQuantity,
-          total: Number.isNaN(total) ? '' : total,
-          difference: Number.isNaN(difference) ? '' : difference,
-          observation: String(item.observation || '').trim(),
-          status: calculateStatus(item),
+          ...cleanItem,
+          observation: String(cleanItem.observation || '').trim(),
+          countEntries: Array.isArray(cleanItem.countEntries)
+            ? cleanItem.countEntries
+            : [],
         };
       });
 
@@ -217,8 +294,12 @@ export default function InventoryDetailPage() {
         notes
       );
 
+      const refreshedItems = Array.isArray(savedInventory.items)
+        ? savedInventory.items.map(normalizeItem)
+        : [];
+
       setInventory(savedInventory);
-      setItems(savedInventory.items || []);
+      setItems(refreshedItems);
       setNotes(savedInventory.notes || '');
       setSuccess('Inventario actualizado correctamente.');
     } catch (err) {
@@ -280,14 +361,14 @@ export default function InventoryDetailPage() {
                   Detalle de inventario
                 </p>
                 <h1 className="text-3xl font-bold text-white">
-                  Inventario del día
+                  Conteo del inventario
                 </h1>
               </div>
             </div>
 
             <p className="text-sm leading-7 text-zinc-400">
-              Captura el conteo físico, total, diferencia y observaciones de
-              cada producto.
+              Cada producto puede tener varios conteos. El sistema suma los
+              conteos y te deja eliminar entradas individuales si te equivocas.
             </p>
           </div>
 
@@ -413,6 +494,11 @@ export default function InventoryDetailPage() {
                   sourceItem.supplierCode === item.supplierCode
               );
 
+              const draft = entryDrafts[realIndex] || {
+                quantity: '',
+                comment: '',
+              };
+
               return (
                 <div
                   key={`${item.productName}-${item.categoryCode}-${item.supplierCode}-${realIndex}`}
@@ -442,13 +528,9 @@ export default function InventoryDetailPage() {
 
                   <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                      <span className="block text-xs text-zinc-500">
-                        Cantidad esperada
-                      </span>
+                      <span className="block text-xs text-zinc-500">Stock</span>
                       <span className="text-zinc-200">
-                        {Number(item.expectedQuantity || 0).toLocaleString(
-                          'es-MX'
-                        )}
+                        {item.expectedQuantity.toLocaleString('es-MX')}
                       </span>
                     </div>
 
@@ -457,97 +539,136 @@ export default function InventoryDetailPage() {
                         No disponible
                       </span>
                       <span className="text-zinc-200">
-                        {Number(item.unavailableQuantity || 0).toLocaleString(
-                          'es-MX'
-                        )}
+                        {item.unavailableQuantity.toLocaleString('es-MX')}
                       </span>
                     </div>
 
-                    <div>
-                      <label className="mb-2 block text-xs text-zinc-500">
-                        Conteo físico
-                      </label>
-                      <input
-                        type="number"
-                        value={toDisplayNumber(item.countedQuantity)}
-                        onChange={(e) =>
-                          handleItemChange(
-                            realIndex,
-                            'countedQuantity',
-                            e.target.value
-                          )
-                        }
-                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                        placeholder="0"
-                      />
+                    <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                      <span className="block text-xs text-zinc-500">
+                        Contado acumulado
+                      </span>
+                      <span className="text-zinc-200">
+                        {item.countedQuantity.toLocaleString('es-MX')}
+                      </span>
                     </div>
 
-                    <div>
-                      <label className="mb-2 block text-xs text-zinc-500">
-                        Total
-                      </label>
-                      <input
-                        type="number"
-                        value={toDisplayNumber(item.total)}
-                        onChange={(e) =>
-                          handleItemChange(realIndex, 'total', e.target.value)
-                        }
-                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                        placeholder="0"
-                      />
+                    <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                      <span className="block text-xs text-zinc-500">
+                        Diferencia
+                      </span>
+                      <span className="text-zinc-200">
+                        {item.difference.toLocaleString('es-MX')}
+                      </span>
                     </div>
                   </div>
 
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className="mb-2 block text-xs text-zinc-500">
-                        Diferencia
-                      </label>
+                  <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                    <p className="mb-3 text-sm font-semibold text-white">
+                      Agregar conteo
+                    </p>
+
+                    <div className="grid gap-3 md:grid-cols-[160px_1fr_auto]">
                       <input
                         type="number"
-                        value={toDisplayNumber(item.difference)}
+                        value={draft.quantity}
                         onChange={(e) =>
-                          handleItemChange(
+                          handleDraftChange(
                             realIndex,
-                            'difference',
+                            'quantity',
                             e.target.value
                           )
                         }
-                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                        placeholder="0"
+                        placeholder="Cantidad"
+                        className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
                       />
-                    </div>
 
-                    <div>
-                      <label className="mb-2 block text-xs text-zinc-500">
-                        Observación
-                      </label>
                       <input
                         type="text"
-                        value={item.observation || ''}
+                        value={draft.comment}
                         onChange={(e) =>
-                          handleItemChange(
+                          handleDraftChange(
                             realIndex,
-                            'observation',
+                            'comment',
                             e.target.value
                           )
                         }
-                        className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                        placeholder="Ej. dañado, caducado, exhibición..."
+                        placeholder="Comentario: tarima A, exhibición, pasillo..."
+                        className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
                       />
+
+                      <button
+                        onClick={() => handleAddCountEntry(realIndex)}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500"
+                      >
+                        <Plus size={16} />
+                        Agregar
+                      </button>
                     </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="mb-2 block text-xs text-zinc-500">
+                      Observación general del producto
+                    </label>
+                    <input
+                      type="text"
+                      value={item.observation || ''}
+                      onChange={(e) =>
+                        handleObservationChange(realIndex, e.target.value)
+                      }
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-white outline-none transition focus:border-blue-500"
+                      placeholder="Ej. dañado, caducado, exhibición, maltratado..."
+                    />
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    <p className="text-sm font-semibold text-white">
+                      Historial de conteos
+                    </p>
+
+                    {!item.countEntries || item.countEntries.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-400">
+                        Aún no hay conteos registrados para este producto.
+                      </div>
+                    ) : (
+                      item.countEntries.map((entry) => (
+                        <div
+                          key={entry.id}
+                          className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 md:flex-row md:items-center md:justify-between"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium text-white">
+                              +
+                              {safeNumber(entry.quantity).toLocaleString(
+                                'es-MX'
+                              )}
+                            </p>
+                            <p className="mt-1 text-sm text-zinc-400">
+                              {entry.comment || 'Sin comentario'}
+                            </p>
+                            <p className="mt-1 text-xs text-zinc-500">
+                              {entry.createdAt || 'Sin fecha'}
+                            </p>
+                          </div>
+
+                          <button
+                            onClick={() =>
+                              handleDeleteCountEntry(realIndex, entry.id)
+                            }
+                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-900 bg-red-950/40 px-4 py-2 font-medium text-red-300 transition hover:bg-red-900/40"
+                          >
+                            <Trash2 size={16} />
+                            Eliminar
+                          </button>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               );
             })
           )}
         </div>
-
-        {filteredItems.length > 100 && (
-          <p className="mt-4 text-sm text-zinc-500">
-            Usa la búsqueda para filtrar más rápido.
-          </p>
-        )}
       </section>
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
