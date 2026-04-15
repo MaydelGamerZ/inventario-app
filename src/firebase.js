@@ -1,11 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getDatabase } from 'firebase/database';
+import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBKNi2wRe89QxR3KBXxxFce-Fnjrw2-PmU',
   authDomain: 'inventario-7aea1.firebaseapp.com',
-  databaseURL: 'https://inventario-7aea1-default-rtdb.firebaseio.com',
   projectId: 'inventario-7aea1',
   storageBucket: 'inventario-7aea1.firebasestorage.app',
   messagingSenderId: '297617050305',
@@ -15,8 +14,8 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-const auth = getAuth(app);
-const db = getDatabase(app);
-const googleProvider = new GoogleAuthProvider();
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const googleProvider = new GoogleAuthProvider();
 
-export { app, auth, db, googleProvider };
+export default app;

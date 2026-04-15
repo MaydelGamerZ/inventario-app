@@ -6,24 +6,16 @@ import InventoryDayPage from '../pages/InventoryDayPage';
 import InventoryDetailPage from '../pages/InventoryDetailPage';
 import LoginPage from '../pages/LoginPage';
 import NotFoundPage from '../pages/NotFoundPage';
+import ProductsPage from '../pages/ProductsPage';
 
 function HistorialPage() {
   return (
-    <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <h1 className="text-2xl font-bold">Historial de Inventarios</h1>
-      <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+    <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6">
+      <h1 className="text-2xl font-bold text-white">
+        Historial de Inventarios
+      </h1>
+      <p className="mt-2 text-zinc-400">
         Aquí irá el historial de inventarios guardados.
-      </p>
-    </div>
-  );
-}
-
-function ProductosPage() {
-  return (
-    <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <h1 className="text-2xl font-bold">Productos / Categorías</h1>
-      <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-        Aquí irá el catálogo de productos y categorías.
       </p>
     </div>
   );
@@ -46,7 +38,7 @@ export default function AppRouter() {
           <Route path="/inventario-diario" element={<InventoryDayPage />} />
           <Route path="/inventario/:id" element={<InventoryDetailPage />} />
           <Route path="/historial" element={<HistorialPage />} />
-          <Route path="/productos" element={<ProductosPage />} />
+          <Route path="/productos" element={<ProductsPage />} />
         </Route>
 
         <Route path="*" element={<NotFoundPage />} />
