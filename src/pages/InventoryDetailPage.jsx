@@ -1,218 +1,189 @@
-import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import {
+  ArrowLeft,
+  PackagePlus,
+  Save,
+  Trash2,
+  ClipboardList,
+} from 'lucide-react';
 import {
   getInventoryById,
-  updateInventoryBasicData,
-  getCategoriesByInventoryId,
-  getProductsByCategory,
-  importParsedPdfToInventory,
-} from '../services/inventory.js';
-import { parseInventoryPdf } from '../services/pdfInventoryParser.js';
-
-function formatDate(dateString) {
-  if (!dateString) return 'Sin fecha';
-
-  const date = new Date(`${dateString}T00:00:00`);
-
-  return date.toLocaleDateString('es-MX', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-}
+  getProducts,
+  updateInventory,
+} from '../services/inventory';
 
 export default function InventoryDetailPage() {
-  const { inventoryId } = useParams();
+  const { id } = useParams();
   const navigate = useNavigate();
 
   const [inventory, setInventory] = useState(null);
-  const [form, setForm] = useState({
-    semana: '',
-    cedis: '',
-    estado: 'abierto',
-  });
+  const [products, setProducts] = useState([]);
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [notes, setNotes] = useState('');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
-  const [categories, setCategories] = useState([]);
-  const [selectedCategoryId, setSelectedCategoryId] = useState('');
-  const [products, setProducts] = useState([]);
-
-  const [pdfFile, setPdfFile] = useState(null);
-  const [importingPdf, setImportingPdf] = useState(false);
-  const [pdfSummary, setPdfSummary] = useState(null);
-
-  async function loadInventory() {
+  async function loadData() {
     try {
       setLoading(true);
-      setMessage('');
+      setError('');
+      setSuccess('');
 
-      const data = await getInventoryById(inventoryId);
+      const [inventoryData, productsData] = await Promise.all([
+        getInventoryById(id),
+        getProducts(),
+      ]);
 
-      if (!data) {
+      if (!inventoryData) {
         setInventory(null);
-        setMessage('El inventario no existe.');
         return;
       }
 
-      setInventory(data);
-      setForm({
-        semana: data.semana || '',
-        cedis: data.cedis || '',
-        estado: data.estado || 'abierto',
-      });
-
-      const loadedCategories = await getCategoriesByInventoryId(inventoryId);
-      setCategories(loadedCategories);
-
-      if (loadedCategories.length > 0) {
-        const firstCategoryId = loadedCategories[0].id;
-        setSelectedCategoryId(firstCategoryId);
-
-        const loadedProducts = await getProductsByCategory(
-          inventoryId,
-          firstCategoryId
-        );
-        setProducts(loadedProducts);
-      } else {
-        setSelectedCategoryId('');
-        setProducts([]);
-      }
-    } catch (error) {
-      console.error('Error al cargar inventario:', error);
-      setInventory(null);
-      setMessage('Error al cargar el inventario.');
+      setInventory(inventoryData);
+      setProducts(productsData);
+      setNotes(inventoryData.notes || '');
+    } catch (err) {
+      console.error(err);
+      setError('No se pudo cargar el inventario.');
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadProducts(categoryId) {
-    if (!categoryId) {
-      setProducts([]);
+  useEffect(() => {
+    loadData();
+  }, [id]);
+
+  const availableProducts = useMemo(() => {
+    if (!inventory) return products;
+
+    const existingIds = new Set(
+      (inventory.items || []).map((item) => item.productId)
+    );
+
+    return products.filter((product) => !existingIds.has(product.id));
+  }, [products, inventory]);
+
+  const handleAddItem = () => {
+    setError('');
+    setSuccess('');
+
+    if (!inventory) return;
+
+    if (!selectedProductId) {
+      setError('Selecciona un producto.');
       return;
     }
 
-    try {
-      const loadedProducts = await getProductsByCategory(
-        inventoryId,
-        categoryId
-      );
-      setProducts(loadedProducts);
-    } catch (error) {
-      console.error('Error al cargar productos:', error);
-      setMessage('Error al cargar productos.');
+    const numericQuantity = Number(quantity);
+
+    if (!numericQuantity || numericQuantity < 0) {
+      setError('Ingresa una cantidad válida.');
+      return;
     }
-  }
 
-  useEffect(() => {
-    if (inventoryId) {
-      loadInventory();
+    const selectedProduct = products.find(
+      (product) => product.id === selectedProductId
+    );
+
+    if (!selectedProduct) {
+      setError('El producto seleccionado no es válido.');
+      return;
     }
-  }, [inventoryId]);
 
-  function handleChange(e) {
-    const { name, value } = e.target;
+    const newItem = {
+      productId: selectedProduct.id,
+      name: selectedProduct.name,
+      categoryId: selectedProduct.categoryId || '',
+      categoryName: selectedProduct.categoryName || '',
+      presentation: selectedProduct.presentation || '',
+      weight: selectedProduct.weight || '',
+      sku: selectedProduct.sku || '',
+      quantity: numericQuantity,
+    };
 
-    setForm((prev) => ({
+    setInventory((prev) => ({
       ...prev,
-      [name]: value,
+      items: [...(prev.items || []), newItem],
     }));
-  }
 
-  async function handleSave(e) {
-    e.preventDefault();
+    setSelectedProductId('');
+    setQuantity('');
+  };
+
+  const handleRemoveItem = (productId) => {
+    setError('');
+    setSuccess('');
+
+    setInventory((prev) => ({
+      ...prev,
+      items: (prev.items || []).filter((item) => item.productId !== productId),
+    }));
+  };
+
+  const handleItemQuantityChange = (productId, value) => {
+    const numericValue = value === '' ? '' : Number(value);
+
+    setInventory((prev) => ({
+      ...prev,
+      items: (prev.items || []).map((item) =>
+        item.productId === productId
+          ? {
+              ...item,
+              quantity: numericValue,
+            }
+          : item
+      ),
+    }));
+  };
+
+  const handleHeaderChange = (field, value) => {
+    setInventory((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleSave = async () => {
+    if (!inventory) return;
 
     try {
       setSaving(true);
-      setMessage('');
+      setError('');
+      setSuccess('');
 
-      await updateInventoryBasicData(inventoryId, {
-        semana: form.semana.trim(),
-        cedis: form.cedis.trim(),
-        estado: form.estado,
+      const sanitizedItems = (inventory.items || []).map((item) => ({
+        ...item,
+        quantity: Number(item.quantity) || 0,
+      }));
+
+      await updateInventory(inventory.id, {
+        date: inventory.date || '',
+        status: inventory.status || 'Abierto',
+        cedis: inventory.cedis || '',
+        week: inventory.week || '',
+        items: sanitizedItems,
+        notes: notes.trim(),
       });
 
-      await loadInventory();
-      setMessage('Inventario actualizado correctamente.');
-    } catch (error) {
-      console.error('Error al guardar inventario:', error);
-      setMessage('No se pudo actualizar el inventario.');
+      setSuccess('Inventario actualizado correctamente.');
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      setError('No se pudo guardar el inventario.');
     } finally {
       setSaving(false);
     }
-  }
-
-  function handlePdfChange(e) {
-    const file = e.target.files?.[0] || null;
-    setPdfFile(file);
-    setPdfSummary(null);
-  }
-
-  async function handleAnalyzePdf() {
-    if (!pdfFile) {
-      setMessage('Selecciona un PDF primero.');
-      return;
-    }
-
-    try {
-      setImportingPdf(true);
-      setMessage('');
-
-      const parsed = await parseInventoryPdf(pdfFile);
-      setPdfSummary(parsed);
-
-      setMessage(
-        'PDF analizado correctamente. Revisa el resumen antes de importar.'
-      );
-    } catch (error) {
-      console.error('Error al analizar PDF:', error);
-      setMessage('No se pudo leer el PDF.');
-    } finally {
-      setImportingPdf(false);
-    }
-  }
-
-  async function handleImportPdf() {
-    if (!pdfSummary) {
-      setMessage('Primero analiza el PDF.');
-      return;
-    }
-
-    const confirmed = window.confirm(
-      'Esta acción reemplazará las categorías y productos actuales del inventario. ¿Deseas continuar?'
-    );
-
-    if (!confirmed) return;
-
-    try {
-      setImportingPdf(true);
-      setMessage('');
-
-      await importParsedPdfToInventory(inventoryId, pdfSummary);
-      setPdfFile(null);
-      setPdfSummary(null);
-
-      await loadInventory();
-      setMessage('PDF importado correctamente.');
-    } catch (error) {
-      console.error('Error al importar PDF:', error);
-      setMessage(error.message || 'No se pudo importar el PDF.');
-    } finally {
-      setImportingPdf(false);
-    }
-  }
-
-  async function handleSelectCategory(categoryId) {
-    setSelectedCategoryId(categoryId);
-    await loadProducts(categoryId);
-  }
+  };
 
   if (loading) {
     return (
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-zinc-400">
+      <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6 text-zinc-300">
         Cargando inventario...
       </div>
     );
@@ -220,273 +191,272 @@ export default function InventoryDetailPage() {
 
   if (!inventory) {
     return (
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-        <p className="text-zinc-300">{message}</p>
-        <button
-          onClick={() => navigate('/inventario-diario')}
-          className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-500 transition"
-        >
-          Volver
-        </button>
+      <div className="space-y-4">
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6">
+          <h1 className="text-2xl font-bold text-white">
+            Inventario no encontrado
+          </h1>
+          <p className="mt-2 text-zinc-400">
+            El inventario que intentaste abrir no existe o fue eliminado.
+          </p>
+
+          <div className="mt-5">
+            <Link
+              to="/inventario-diario"
+              className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-500"
+            >
+              <ArrowLeft size={18} />
+              Volver
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-3xl font-bold">Detalle del Inventario</h2>
-          <p className="mt-2 text-zinc-400">
-            Aquí cargaremos el PDF diario para crear categorías y productos.
-          </p>
+    <div className="space-y-4">
+      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="mb-3 flex items-center gap-3">
+              <button
+                onClick={() => navigate('/inventario-diario')}
+                className="flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-800 bg-black text-zinc-200 transition hover:border-zinc-700"
+              >
+                <ArrowLeft size={18} />
+              </button>
+
+              <div>
+                <p className="text-sm font-medium text-blue-400">
+                  Detalle de inventario
+                </p>
+                <h1 className="text-3xl font-bold text-white">
+                  Inventario del día
+                </h1>
+              </div>
+            </div>
+
+            <p className="text-sm leading-7 text-zinc-400">
+              Aquí puedes editar el inventario, agregar productos, cambiar
+              cantidades y guardar los cambios.
+            </p>
+          </div>
+
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Save size={18} />
+            {saving ? 'Guardando...' : 'Guardar cambios'}
+          </button>
         </div>
+      </section>
 
-        <button
-          onClick={() => navigate('/inventario-diario')}
-          className="rounded-xl bg-zinc-800 px-5 py-3 font-semibold text-white hover:bg-zinc-700 transition"
-        >
-          Volver
-        </button>
-      </header>
-
-      {message && (
-        <div className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-4 text-sm text-zinc-200">
-          {message}
+      {error && (
+        <div className="rounded-2xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+          {error}
         </div>
       )}
 
-      <section className="mb-8 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <p className="text-sm text-zinc-400">Fecha</p>
-          <h3 className="mt-2 text-lg font-semibold">
-            {formatDate(inventory.fecha)}
-          </h3>
+      {success && (
+        <div className="rounded-2xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
+          {success}
+        </div>
+      )}
+
+      <section className="grid gap-4 xl:grid-cols-4">
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
+          <label className="mb-2 block text-sm text-zinc-400">Fecha</label>
+          <input
+            type="text"
+            value={inventory.date || ''}
+            onChange={(e) => handleHeaderChange('date', e.target.value)}
+            className="w-full rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-white outline-none transition focus:border-blue-500"
+          />
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <p className="text-sm text-zinc-400">Estado</p>
-          <h3 className="mt-2 text-lg font-semibold capitalize">
-            {inventory.estado}
-          </h3>
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
+          <label className="mb-2 block text-sm text-zinc-400">Estado</label>
+          <select
+            value={inventory.status || 'Abierto'}
+            onChange={(e) => handleHeaderChange('status', e.target.value)}
+            className="w-full rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-white outline-none transition focus:border-blue-500"
+          >
+            <option value="Abierto">Abierto</option>
+            <option value="Cerrado">Cerrado</option>
+          </select>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <p className="text-sm text-zinc-400">Total categorías</p>
-          <h3 className="mt-2 text-lg font-semibold">
-            {inventory.totalCategorias || 0}
-          </h3>
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
+          <label className="mb-2 block text-sm text-zinc-400">Cedis</label>
+          <input
+            type="text"
+            value={inventory.cedis || ''}
+            onChange={(e) => handleHeaderChange('cedis', e.target.value)}
+            placeholder="Ej. Mazatlán"
+            className="w-full rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-white outline-none transition focus:border-blue-500"
+          />
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <p className="text-sm text-zinc-400">Total productos</p>
-          <h3 className="mt-2 text-lg font-semibold">
-            {inventory.totalProductos || 0}
-          </h3>
-        </div>
-      </section>
-
-      <section className="mb-8 grid gap-6 md:grid-cols-2">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <h3 className="text-xl font-bold">Datos básicos</h3>
-
-          <form onSubmit={handleSave} className="mt-5 space-y-4">
-            <div>
-              <label
-                htmlFor="semana"
-                className="mb-2 block text-sm font-medium"
-              >
-                Semana
-              </label>
-              <input
-                id="semana"
-                name="semana"
-                type="text"
-                value={form.semana}
-                onChange={handleChange}
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="cedis" className="mb-2 block text-sm font-medium">
-                Cedis
-              </label>
-              <input
-                id="cedis"
-                name="cedis"
-                type="text"
-                value={form.cedis}
-                onChange={handleChange}
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="estado"
-                className="mb-2 block text-sm font-medium"
-              >
-                Estado
-              </label>
-              <select
-                id="estado"
-                name="estado"
-                value={form.estado}
-                onChange={handleChange}
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 outline-none focus:border-blue-500"
-              >
-                <option value="abierto">abierto</option>
-                <option value="cerrado">cerrado</option>
-                <option value="archivado">archivado</option>
-              </select>
-            </div>
-
-            <button
-              type="submit"
-              disabled={saving}
-              className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
-            >
-              {saving ? 'Guardando...' : 'Guardar cambios'}
-            </button>
-          </form>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <h3 className="text-xl font-bold">Importar PDF diario</h3>
-
-          <div className="mt-5 space-y-4">
-            <input
-              type="file"
-              accept="application/pdf"
-              onChange={handlePdfChange}
-              className="block w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-sm text-white"
-            />
-
-            <button
-              type="button"
-              onClick={handleAnalyzePdf}
-              disabled={!pdfFile || importingPdf}
-              className="w-full rounded-xl bg-zinc-700 px-4 py-3 font-semibold text-white hover:bg-zinc-600 transition disabled:opacity-60"
-            >
-              {importingPdf ? 'Analizando...' : 'Analizar PDF'}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleImportPdf}
-              disabled={!pdfSummary || importingPdf}
-              className="w-full rounded-xl bg-green-600 px-4 py-3 font-semibold text-white hover:bg-green-500 transition disabled:opacity-60"
-            >
-              {importingPdf ? 'Importando...' : 'Importar al inventario'}
-            </button>
-          </div>
-
-          {pdfSummary && (
-            <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-              <p className="text-sm text-zinc-400">Resumen detectado</p>
-
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <div>
-                  <p className="text-xs text-zinc-500">Semana</p>
-                  <p className="font-semibold text-white">
-                    {pdfSummary.semana || 'No detectada'}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-zinc-500">Cedis</p>
-                  <p className="font-semibold text-white">
-                    {pdfSummary.cedis || 'No detectado'}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-zinc-500">Categorías</p>
-                  <p className="font-semibold text-white">
-                    {pdfSummary.totalCategorias}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-zinc-500">Productos</p>
-                  <p className="font-semibold text-white">
-                    {pdfSummary.totalProductos}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
+          <label className="mb-2 block text-sm text-zinc-400">Semana</label>
+          <input
+            type="text"
+            value={inventory.week || ''}
+            onChange={(e) => handleHeaderChange('week', e.target.value)}
+            placeholder="Ej. Semana 15"
+            className="w-full rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-white outline-none transition focus:border-blue-500"
+          />
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <h3 className="text-xl font-bold">Categorías cargadas</h3>
-
-          <div className="mt-5 space-y-3">
-            {categories.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-sm text-zinc-400">
-                Aún no hay categorías en este inventario.
-              </div>
-            ) : (
-              categories.map((category) => {
-                const selected = selectedCategoryId === category.id;
-
-                return (
-                  <button
-                    key={category.id}
-                    type="button"
-                    onClick={() => handleSelectCategory(category.id)}
-                    className={`w-full rounded-xl border p-4 text-left transition ${
-                      selected
-                        ? 'border-blue-500 bg-zinc-800'
-                        : 'border-zinc-800 bg-zinc-950'
-                    }`}
-                  >
-                    <p className="font-semibold text-white">
-                      {category.nombre}
-                    </p>
-                    <p className="mt-1 text-sm text-zinc-400">
-                      Orden: {category.orden || 0}
-                    </p>
-                  </button>
-                );
-              })
-            )}
+      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-blue-400">
+            <PackagePlus size={22} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-white">Agregar producto</h2>
+            <p className="text-sm text-zinc-400">
+              Selecciona un producto del catálogo y asigna su cantidad.
+            </p>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <h3 className="text-xl font-bold">Productos de la categoría</h3>
+        <div className="grid gap-3 lg:grid-cols-[1.2fr_0.5fr_auto]">
+          <select
+            value={selectedProductId}
+            onChange={(e) => setSelectedProductId(e.target.value)}
+            className="w-full rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-white outline-none transition focus:border-blue-500"
+          >
+            <option value="">Selecciona un producto</option>
+            {availableProducts.map((product) => (
+              <option key={product.id} value={product.id}>
+                {product.name} {product.weight ? `- ${product.weight}` : ''}
+              </option>
+            ))}
+          </select>
 
-          {!selectedCategoryId ? (
-            <div className="mt-5 rounded-xl border border-dashed border-zinc-700 p-4 text-sm text-zinc-400">
-              Selecciona una categoría para ver sus productos.
-            </div>
-          ) : (
-            <div className="mt-5 space-y-3">
-              {products.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-zinc-700 p-4 text-sm text-zinc-400">
-                  No hay productos en esta categoría.
-                </div>
-              ) : (
-                products.map((product) => (
-                  <div
-                    key={product.id}
-                    className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
-                  >
-                    <p className="font-semibold text-white">{product.nombre}</p>
-                    <p className="mt-1 text-sm text-zinc-400">
-                      Stock esperado: {product.stockEsperado} | No disponible:{' '}
-                      {product.noDisponible}
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            placeholder="Cantidad"
+            className="w-full rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-white outline-none transition focus:border-blue-500"
+          />
+
+          <button
+            onClick={handleAddItem}
+            className="rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500"
+          >
+            Agregar
+          </button>
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-emerald-400">
+            <ClipboardList size={22} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-white">
+              Productos del inventario
+            </h2>
+            <p className="text-sm text-zinc-400">
+              Total registrados: {(inventory.items || []).length}
+            </p>
+          </div>
+        </div>
+
+        {(inventory.items || []).length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-zinc-800 bg-black px-4 py-6 text-sm text-zinc-400">
+            Este inventario todavía no tiene productos agregados.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {(inventory.items || []).map((item) => (
+              <div
+                key={item.productId}
+                className="rounded-2xl border border-zinc-800 bg-black p-4"
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-white">{item.name}</p>
+                    <p className="mt-1 text-sm text-blue-400">
+                      {item.categoryName || 'Sin categoría'}
                     </p>
+
+                    <div className="mt-3 grid gap-2 text-sm text-zinc-400 sm:grid-cols-3">
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                        <span className="block text-xs text-zinc-500">
+                          Presentación
+                        </span>
+                        <span className="text-zinc-300">
+                          {item.presentation || '—'}
+                        </span>
+                      </div>
+
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                        <span className="block text-xs text-zinc-500">
+                          Peso
+                        </span>
+                        <span className="text-zinc-300">
+                          {item.weight || '—'}
+                        </span>
+                      </div>
+
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                        <span className="block text-xs text-zinc-500">SKU</span>
+                        <span className="text-zinc-300">{item.sku || '—'}</span>
+                      </div>
+                    </div>
                   </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
+
+                  <div className="flex flex-col gap-3 lg:w-[180px]">
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={item.quantity}
+                      onChange={(e) =>
+                        handleItemQuantityChange(item.productId, e.target.value)
+                      }
+                      className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+                    />
+
+                    <button
+                      onClick={() => handleRemoveItem(item.productId)}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-900 bg-red-950/40 px-4 py-3 font-medium text-red-300 transition hover:bg-red-900/40"
+                    >
+                      <Trash2 size={16} />
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
+        <h2 className="text-xl font-bold text-white">Notas</h2>
+        <p className="mt-1 text-sm text-zinc-400">
+          Aquí puedes guardar observaciones del inventario.
+        </p>
+
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={5}
+          placeholder="Escribe observaciones, incidencias o comentarios..."
+          className="mt-4 w-full rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-white outline-none transition focus:border-blue-500"
+        />
       </section>
     </div>
   );

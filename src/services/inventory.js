@@ -3,15 +3,18 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   orderBy,
   query,
   serverTimestamp,
+  updateDoc,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
 const categoriesRef = collection(db, 'categories');
 const productsRef = collection(db, 'products');
+const inventoriesRef = collection(db, 'inventories');
 
 export async function getCategories() {
   const q = query(categoriesRef, orderBy('name', 'asc'));
@@ -65,4 +68,44 @@ export async function createProduct(data) {
 
 export async function deleteProduct(productId) {
   await deleteDoc(doc(db, 'products', productId));
+}
+
+export async function getInventoryById(inventoryId) {
+  const ref = doc(db, 'inventories', inventoryId);
+  const snapshot = await getDoc(ref);
+
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  return {
+    id: snapshot.id,
+    ...snapshot.data(),
+  };
+}
+
+export async function updateInventory(inventoryId, data) {
+  const ref = doc(db, 'inventories', inventoryId);
+
+  await updateDoc(ref, {
+    ...data,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function createInventory(data) {
+  const payload = {
+    date: data.date || '',
+    status: data.status || 'Abierto',
+    cedis: data.cedis || '',
+    week: data.week || '',
+    createdBy: data.createdBy || '',
+    items: data.items || [],
+    notes: data.notes || '',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  const docRef = await addDoc(inventoriesRef, payload);
+  return docRef.id;
 }
