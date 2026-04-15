@@ -1,38 +1,34 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
-import { loginWithEmail, loginWithGoogle } from "../services/auth";
-import { useAuth } from "../context/AuthContext";
+import { loginWithEmail, loginWithGoogle } from "../services/auth.js";
+import { useAuth } from "../context/AuthContext.jsx";
 
+/**
+ * Login page that allows users to sign in with email/password or Google.
+ * Redirects authenticated users to the home page.
+ */
 export default function LoginPage() {
   const { user, loadingAuth } = useAuth();
-
   const [form, setForm] = useState({
     email: "",
     password: "",
   });
-
   const [loadingEmail, setLoadingEmail] = useState(false);
   const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
   function handleChange(e) {
     const { name, value } = e.target;
-
-    setForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setForm((prev) => ({ ...prev, [name]: value }));
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setErrorMessage("");
-
     if (!form.email.trim() || !form.password.trim()) {
       setErrorMessage("Completa correo y contraseña.");
       return;
     }
-
     try {
       setLoadingEmail(true);
       await loginWithEmail(form.email.trim(), form.password);
@@ -46,7 +42,6 @@ export default function LoginPage() {
 
   async function handleGoogleLogin() {
     setErrorMessage("");
-
     try {
       setLoadingGoogle(true);
       await loginWithGoogle();
@@ -65,11 +60,9 @@ export default function LoginPage() {
       </div>
     );
   }
-
   if (user) {
     return <Navigate to="/" replace />;
   }
-
   return (
     <main className="min-h-screen bg-zinc-950 text-white flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-md rounded-3xl border border-zinc-800 bg-zinc-900 p-8 shadow-2xl">
@@ -79,7 +72,6 @@ export default function LoginPage() {
             Inicia sesión para entrar al panel.
           </p>
         </div>
-
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="email" className="mb-2 block text-sm font-medium">
@@ -95,7 +87,6 @@ export default function LoginPage() {
               className="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 outline-none focus:border-blue-500"
             />
           </div>
-
           <div>
             <label htmlFor="password" className="mb-2 block text-sm font-medium">
               Contraseña
@@ -110,13 +101,11 @@ export default function LoginPage() {
               className="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 outline-none focus:border-blue-500"
             />
           </div>
-
           {errorMessage && (
             <div className="rounded-xl border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-300">
               {errorMessage}
             </div>
           )}
-
           <button
             type="submit"
             disabled={loadingEmail}
@@ -125,13 +114,11 @@ export default function LoginPage() {
             {loadingEmail ? "Entrando..." : "Entrar con correo"}
           </button>
         </form>
-
         <div className="my-5 flex items-center gap-3">
           <div className="h-px flex-1 bg-zinc-800" />
           <span className="text-xs text-zinc-500">o</span>
           <div className="h-px flex-1 bg-zinc-800" />
         </div>
-
         <button
           onClick={handleGoogleLogin}
           disabled={loadingGoogle}

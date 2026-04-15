@@ -1,243 +1,243 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
-  createTodayInventory,
-  getAllInventories,
-  getInventoryByDate,
-} from '../services/inventory';
-
-function getTodayDateString() {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
+  getInventoryById,
+  updateInventoryBasicData,
+} from "../services/inventory.js";
 
 function formatDate(dateString) {
-  if (!dateString) return 'Sin fecha';
-
+  if (!dateString) return "Sin fecha";
   const date = new Date(`${dateString}T00:00:00`);
-
-  return date.toLocaleDateString('es-MX', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
+  return date.toLocaleDateString("es-MX", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
   });
 }
 
-export default function InventoryDayPage() {
-  const { user } = useAuth();
-
-  const [todayInventory, setTodayInventory] = useState(null);
-  const [inventories, setInventories] = useState([]);
+/**
+ * Detailed view of a single inventory record. Allows editing basic fields
+ * such as semana, cedis, and estado.
+ */
+export default function InventoryDetailPage() {
+  const { inventoryId } = useParams();
+  const navigate = useNavigate();
+  const [inventory, setInventory] = useState(null);
+  const [form, setForm] = useState({
+    semana: "",
+    cedis: "",
+    estado: "abierto",
+  });
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
 
-  async function loadData() {
+  async function loadInventory() {
     try {
       setLoading(true);
-      setMessage('');
-
-      const today = getTodayDateString();
-
-      const [inventoryToday, allInventories] = await Promise.all([
-        getInventoryByDate(today),
-        getAllInventories(),
-      ]);
-
-      setTodayInventory(inventoryToday);
-      setInventories(allInventories);
+      setMessage("");
+      const data = await getInventoryById(inventoryId);
+      if (!data) {
+        setInventory(null);
+        setMessage("El inventario no existe.");
+        return;
+      }
+      setInventory(data);
+      setForm({
+        semana: data.semana || "",
+        cedis: data.cedis || "",
+        estado: data.estado || "abierto",
+      });
     } catch (error) {
-      console.error('Error al cargar inventarios:', error);
-      setMessage(error.message || 'Error al cargar inventarios.');
+      console.error("Error al cargar inventario:", error);
+      setInventory(null);
+      setMessage("Error al cargar el inventario.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (inventoryId) {
+      loadInventory();
+    }
+  }, [inventoryId]);
 
-  async function handleCreateTodayInventory() {
+  function handleChange(e) {
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+  }
+
+  async function handleSave(e) {
+    e.preventDefault();
     try {
-      setCreating(true);
-      setMessage('');
-
-      const created = await createTodayInventory(user);
-      setTodayInventory(created);
-
-      await loadData();
-      setMessage('Inventario del día creado correctamente.');
+      setSaving(true);
+      setMessage("");
+      await updateInventoryBasicData(inventoryId, {
+        semana: form.semana.trim(),
+        cedis: form.cedis.trim(),
+        estado: form.estado,
+      });
+      await loadInventory();
+      setMessage("Inventario actualizado correctamente.");
     } catch (error) {
-      console.error('Error al crear inventario:', error);
-      setMessage(error.message || 'No se pudo crear el inventario.');
+      console.error("Error al guardar inventario:", error);
+      setMessage("No se pudo actualizar el inventario.");
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   }
 
+  if (loading) {
+    return (
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-zinc-400">
+        Cargando inventario...
+      </div>
+    );
+  }
+  if (!inventory) {
+    return (
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <p className="text-zinc-300">{message}</p>
+        <button
+          onClick={() => navigate("/inventario-diario")}
+          className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-500 transition"
+        >
+          Volver
+        </button>
+      </div>
+    );
+  }
   return (
     <div>
       <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-3xl font-bold">Inventario Diario</h2>
+          <h2 className="text-3xl font-bold">Detalle del Inventario</h2>
           <p className="mt-2 text-zinc-400">
-            Aquí se crea y administra el inventario base de cada día.
+            Aquí definiremos la base del inventario antes de cargar productos.
           </p>
         </div>
-
         <button
-          onClick={handleCreateTodayInventory}
-          disabled={creating || !!todayInventory}
-          className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+          onClick={() => navigate("/inventario-diario")}
+          className="rounded-xl bg-zinc-800 px-5 py-3 font-semibold text-white hover:bg-zinc-700 transition"
         >
-          {todayInventory
-            ? 'Inventario de hoy ya creado'
-            : creating
-              ? 'Creando...'
-              : 'Crear inventario del día'}
+          Volver
         </button>
       </header>
-
       {message && (
         <div className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-4 text-sm text-zinc-200">
           {message}
         </div>
       )}
-
-      <section className="mb-8 grid gap-4 md:grid-cols-3">
+      <section className="mb-8 grid gap-4 md:grid-cols-4">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <p className="text-sm text-zinc-400">Fecha actual</p>
+          <p className="text-sm text-zinc-400">Fecha</p>
           <h3 className="mt-2 text-lg font-semibold">
-            {formatDate(getTodayDateString())}
+            {formatDate(inventory.fecha)}
           </h3>
         </div>
-
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <p className="text-sm text-zinc-400">Inventario de hoy</p>
-          <h3 className="mt-2 text-lg font-semibold">
-            {todayInventory ? 'Creado' : 'Pendiente'}
+          <p className="text-sm text-zinc-400">Estado</p>
+          <h3 className="mt-2 text-lg font-semibold capitalize">
+            {inventory.estado}
           </h3>
         </div>
-
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <p className="text-sm text-zinc-400">Usuario actual</p>
+          <p className="text-sm text-zinc-400">Total categorías</p>
           <h3 className="mt-2 text-lg font-semibold">
-            {user?.displayName || user?.email || 'Usuario'}
+            {inventory.totalCategorias || 0}
+          </h3>
+        </div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <p className="text-sm text-zinc-400">Total productos</p>
+          <h3 className="mt-2 text-lg font-semibold">
+            {inventory.totalProductos || 0}
           </h3>
         </div>
       </section>
-
-      <section className="mb-10">
-        <div className="mb-4">
-          <h3 className="text-2xl font-bold">Inventario activo del día</h3>
-        </div>
-
-        {loading ? (
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-zinc-400">
-            Cargando...
-          </div>
-        ) : todayInventory ? (
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-            <div className="grid gap-4 md:grid-cols-4">
-              <div>
-                <p className="text-sm text-zinc-400">Fecha</p>
-                <p className="mt-1 font-semibold">
-                  {formatDate(todayInventory.fecha)}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-sm text-zinc-400">Estado</p>
-                <p className="mt-1 font-semibold text-green-400 capitalize">
-                  {todayInventory.estado}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-sm text-zinc-400">Cedis</p>
-                <p className="mt-1 font-semibold">
-                  {todayInventory.cedis || 'Sin definir'}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-sm text-zinc-400">Semana</p>
-                <p className="mt-1 font-semibold">
-                  {todayInventory.semana || 'Sin definir'}
-                </p>
-              </div>
+      <section className="grid gap-6 md:grid-cols-2">
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h3 className="text-xl font-bold">Datos básicos</h3>
+          <form onSubmit={handleSave} className="mt-5 space-y-4">
+            <div>
+              <label htmlFor="semana" className="mb-2 block text-sm font-medium">
+                Semana
+              </label>
+              <input
+                id="semana"
+                name="semana"
+                type="text"
+                value={form.semana}
+                onChange={handleChange}
+                placeholder="Ej. 15"
+                className="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 outline-none focus:border-blue-500"
+              />
             </div>
-
-            <div className="mt-6">
-              <Link
-                to={`/inventario/${todayInventory.id}`}
-                className="inline-flex rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500"
+            <div>
+              <label htmlFor="cedis" className="mb-2 block text-sm font-medium">
+                Cedis
+              </label>
+              <input
+                id="cedis"
+                name="cedis"
+                type="text"
+                value={form.cedis}
+                onChange={handleChange}
+                placeholder="Ej. MEXICALI"
+                className="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label htmlFor="estado" className="mb-2 block text-sm font-medium">
+                Estado
+              </label>
+              <select
+                id="estado"
+                name="estado"
+                value={form.estado}
+                onChange={handleChange}
+                className="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 outline-none focus:border-blue-500"
               >
-                Abrir inventario del día
-              </Link>
+                <option value="abierto">abierto</option>
+                <option value="cerrado">cerrado</option>
+                <option value="archivado">archivado</option>
+              </select>
             </div>
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-900 p-6 text-zinc-400">
-            Aún no existe un inventario para hoy.
-          </div>
-        )}
-      </section>
-
-      <section>
-        <div className="mb-4">
-          <h3 className="text-2xl font-bold">Historial de inventarios</h3>
-          <p className="mt-1 text-sm text-zinc-400">
-            Más adelante aquí veremos el historial completo, filtros y reportes.
-          </p>
+            <button
+              type="submit"
+              disabled={saving}
+              className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
+            >
+              {saving ? "Guardando..." : "Guardar cambios"}
+            </button>
+          </form>
         </div>
-
-        <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
-          <div className="grid grid-cols-5 gap-4 border-b border-zinc-800 px-4 py-4 text-sm font-semibold text-zinc-400">
-            <div>Fecha</div>
-            <div>Estado</div>
-            <div>Cedis</div>
-            <div>Semana</div>
-            <div>Acción</div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h3 className="text-xl font-bold">Resumen técnico</h3>
+          <div className="mt-5 space-y-4 text-sm">
+            <div>
+              <p className="text-zinc-400">ID del inventario</p>
+              <p className="mt-1 break-all text-white">{inventory.id}</p>
+            </div>
+            <div>
+              <p className="text-zinc-400">Origen</p>
+              <p className="mt-1 text-white">{inventory.origen || "manual"}</p>
+            </div>
+            <div>
+              <p className="text-zinc-400">Creado por</p>
+              <p className="mt-1 text-white">
+                {inventory.creadoPor?.nombre || inventory.creadoPor?.email || "Sin dato"}
+              </p>
+            </div>
+            <div>
+              <p className="text-zinc-400">Fecha de creación</p>
+              <p className="mt-1 text-white">{inventory.creadoEn || "Sin dato"}</p>
+            </div>
+            <div>
+              <p className="text-zinc-400">Última actualización</p>
+              <p className="mt-1 text-white">{inventory.actualizadoEn || "Sin dato"}</p>
+            </div>
           </div>
-
-          {loading ? (
-            <div className="px-4 py-6 text-zinc-400">
-              Cargando inventarios...
-            </div>
-          ) : inventories.length === 0 ? (
-            <div className="px-4 py-6 text-zinc-400">
-              No hay inventarios registrados.
-            </div>
-          ) : (
-            inventories.map((inventory) => (
-              <div
-                key={inventory.id}
-                className="grid grid-cols-5 gap-4 border-b border-zinc-800 px-4 py-4 text-sm text-white last:border-b-0"
-              >
-                <div>{formatDate(inventory.fecha)}</div>
-                <div className="capitalize">
-                  {inventory.estado || 'Sin estado'}
-                </div>
-                <div>{inventory.cedis || 'Sin cedis'}</div>
-                <div>{inventory.semana || 'Sin semana'}</div>
-                <div>
-                  <Link
-                    to={`/inventario/${inventory.id}`}
-                    className="font-semibold text-blue-400 hover:text-blue-300"
-                  >
-                    Ver detalle
-                  </Link>
-                </div>
-              </div>
-            ))
-          )}
         </div>
       </section>
     </div>

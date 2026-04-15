@@ -1,5 +1,9 @@
-import { Link } from 'react-router-dom';
+import { Link } from "react-router-dom";
 
+/**
+ * 404 page displayed when no route matches the URL. It offers a link back to
+ * the home page.
+ */
 export default function NotFoundPage() {
   return (
     <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center px-4">

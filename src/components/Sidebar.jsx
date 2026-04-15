@@ -1,7 +1,10 @@
-import { NavLink } from 'react-router-dom';
-import { logoutUser } from '../services/auth';
-import { useAuth } from '../context/AuthContext';
+import { NavLink } from "react-router-dom";
+import { logoutUser } from "../services/auth.js";
+import { useAuth } from "../context/AuthContext.jsx";
 
+/**
+ * Sidebar component that displays navigation links and user info.
+ */
 export default function Sidebar() {
   const { user } = useAuth();
 
@@ -9,14 +12,14 @@ export default function Sidebar() {
     try {
       await logoutUser();
     } catch (error) {
-      console.error('Error al cerrar sesión:', error);
-      alert('No se pudo cerrar sesión.');
+      console.error("Error al cerrar sesión:", error);
+      alert("No se pudo cerrar sesión.");
     }
   }
 
-  const linkBase = 'block rounded-xl px-4 py-3 text-sm font-medium transition';
-  const linkInactive = 'text-zinc-300 hover:bg-zinc-800 hover:text-white';
-  const linkActive = 'bg-blue-600 text-white';
+  const linkBase = "block rounded-xl px-4 py-3 text-sm font-medium transition";
+  const linkInactive = "text-zinc-300 hover:bg-zinc-800 hover:text-white";
+  const linkActive = "bg-blue-600 text-white";
 
   return (
     <aside className="w-full md:w-72 bg-zinc-950 border-r border-zinc-800 p-4 flex flex-col">
@@ -29,18 +32,14 @@ export default function Sidebar() {
         <NavLink
           to="/"
           end
-          className={({ isActive }) =>
-            `${linkBase} ${isActive ? linkActive : linkInactive}`
-          }
+          className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
         >
           Home
         </NavLink>
 
         <NavLink
           to="/inventario-diario"
-          className={({ isActive }) =>
-            `${linkBase} ${isActive ? linkActive : linkInactive}`
-          }
+          className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
         >
           Inventario Diario
         </NavLink>
@@ -65,10 +64,10 @@ export default function Sidebar() {
       <div className="mt-auto pt-6 border-t border-zinc-800">
         <div className="mb-4">
           <p className="text-sm font-semibold text-white truncate">
-            {user?.displayName || 'Usuario'}
+            {user?.displayName || "Usuario"}
           </p>
           <p className="text-xs text-zinc-400 truncate">
-            {user?.email || 'Sin correo'}
+            {user?.email || "Sin correo"}
           </p>
         </div>
 

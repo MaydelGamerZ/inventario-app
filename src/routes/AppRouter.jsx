@@ -1,18 +1,21 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import ProtectedRoute from '../components/ProtectedRoute';
-import AppLayout from '../layouts/AppLayout';
-import LoginPage from '../pages/LoginPage';
-import HomePage from '../pages/HomePage';
-import NotFoundPage from '../pages/NotFoundPage';
-import InventoryDayPage from '../pages/InventoryDayPage';
-import InventoryDetailPage from '../pages/InventoryDetailPage';
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import ProtectedRoute from "../components/ProtectedRoute.jsx";
+import AppLayout from "../layouts/AppLayout.jsx";
+import LoginPage from "../pages/LoginPage.jsx";
+import HomePage from "../pages/HomePage.jsx";
+import NotFoundPage from "../pages/NotFoundPage.jsx";
+import InventoryDayPage from "../pages/InventoryDayPage.jsx";
+import InventoryDetailPage from "../pages/InventoryDetailPage.jsx";
 
+/**
+ * Defines all application routes, including protected routes that require
+ * authentication. Wraps each protected page in the AppLayout.
+ */
 export default function AppRouter() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-
         <Route
           path="/"
           element={
@@ -23,7 +26,6 @@ export default function AppRouter() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/inventario-diario"
           element={
@@ -34,7 +36,6 @@ export default function AppRouter() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/inventario/:inventoryId"
           element={
@@ -45,7 +46,6 @@ export default function AppRouter() {
             </ProtectedRoute>
           }
         />
-
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </BrowserRouter>
