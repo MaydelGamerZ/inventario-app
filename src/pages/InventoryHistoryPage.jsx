@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CalendarDays, Search, ClipboardList, Package } from 'lucide-react';
 import { subscribeAllInventories } from '../services/inventory';
+import { exportInventoryToPDF } from '../services/pdfExporter';
 
 function getTodayDateKey() {
   const now = new Date();
@@ -144,6 +145,13 @@ export default function InventoryHistoryPage() {
                         Editar
                       </button>
                     )}
+                    {/* nuevo botón de descarga */}
+                    <button
+                      onClick={() => exportInventoryToPDF(inv)}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-emerald-500"
+                    >
+                      Descargar
+                    </button>
                   </div>
                 </div>
               </article>

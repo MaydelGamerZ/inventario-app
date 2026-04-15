@@ -15,7 +15,9 @@
     "pdfjs-dist": "^5.6.205",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.5.0"
+    "react-router-dom": "^7.5.0",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.5.28"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.4",
