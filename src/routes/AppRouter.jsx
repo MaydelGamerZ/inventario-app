@@ -25,6 +25,10 @@ export default function AppRouter() {
           <Route path="/" element={<HomePage />} />
           <Route path="/inventario-diario" element={<InventoryDayPage />} />
           <Route path="/inventario/:id" element={<InventoryDetailPage />} />
+          <Route
+            path="/inventario/:id/editar"
+            element={<InventoryDetailPage />}
+          />
           <Route path="/historial" element={<InventoryHistoryPage />} />
           <Route path="/productos" element={<ProductsPage />} />
         </Route>

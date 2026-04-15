@@ -17,6 +17,9 @@ import {
   subscribeAllInventories,
 } from '../services/inventory';
 
+/**
+ * Devuelve la fecha actual en formato yyyy-mm-dd.
+ */
 function getTodayDateKey() {
   const now = new Date();
   const year = now.getFullYear();
@@ -25,15 +28,17 @@ function getTodayDateKey() {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * Convierte un dateKey (yyyy-mm-dd) a una etiqueta en español.
+ */
 function formatDateLabelFromKey(dateKey) {
   if (!dateKey) return 'Sin fecha';
-
   const [year, month, day] = dateKey.split('-').map(Number);
-  const safeYear = year || new Date().getFullYear();
-  const safeMonth = month || 1;
-  const safeDay = day || 1;
-
-  const date = new Date(safeYear, safeMonth - 1, safeDay);
+  const date = new Date(
+    year || new Date().getFullYear(),
+    (month || 1) - 1,
+    day || 1
+  );
   return new Intl.DateTimeFormat('es-MX', {
     day: 'numeric',
     month: 'long',
@@ -41,29 +46,18 @@ function formatDateLabelFromKey(dateKey) {
   }).format(date);
 }
 
-function getStatusColor(status) {
-  switch (status) {
-    case 'OK':
-      return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
-    case 'ALERTA':
-      return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
-    case 'FALTANTE':
-      return 'border-red-900/60 bg-red-950/50 text-red-400';
-    default:
-      return 'border-zinc-800 bg-zinc-900 text-zinc-300';
-  }
-}
-
 export default function InventoryDayPage() {
   const { user } = useAuth();
   const fileInputRef = useRef(null);
 
+  // Fecha de hoy en formato clave y etiqueta.
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayLabel = useMemo(
     () => formatDateLabelFromKey(todayDateKey),
     [todayDateKey]
   );
 
+  // Estado local.
   const [todayInventory, setTodayInventory] = useState(null);
   const [allInventories, setAllInventories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -72,34 +66,27 @@ export default function InventoryDayPage() {
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
 
-  // Suscripciones en tiempo real al inventario del día y al historial
+  // Suscripciones en tiempo real al inventario de hoy y al historial.
   useEffect(() => {
-    // Mostramos loading hasta que llegue la primera actualización del inventario de hoy
     setLoading(true);
-
-    const unsubscribeToday = subscribeInventoryByDate(
-      todayDateKey,
-      (inventory) => {
-        setTodayInventory(inventory);
-        setLoading(false);
-      }
-    );
-
-    const unsubscribeAll = subscribeAllInventories((inventories) => {
-      setAllInventories(inventories);
+    const unsubscribeToday = subscribeInventoryByDate(todayDateKey, (inv) => {
+      setTodayInventory(inv);
+      setLoading(false);
     });
-
+    const unsubscribeAll = subscribeAllInventories((list) =>
+      setAllInventories(list || [])
+    );
     return () => {
       unsubscribeToday();
       unsubscribeAll();
     };
   }, [todayDateKey]);
 
+  // Filtra los productos del inventario de hoy según la búsqueda.
   const filteredItems = useMemo(() => {
     const items = todayInventory?.items || [];
     const term = search.trim().toLowerCase();
     if (!term) return items;
-
     return items.filter((item) => {
       return (
         item.productName?.toLowerCase().includes(term) ||
@@ -109,13 +96,14 @@ export default function InventoryDayPage() {
     });
   }, [todayInventory, search]);
 
+  // Estadísticas básicas para la tarjeta del inventario.
   const stats = useMemo(() => {
     const items = todayInventory?.items || [];
     return {
       totalProducts: items.length,
-      faltantes: items.filter((item) => item.status === 'FALTANTE').length,
-      alerta: items.filter((item) => item.status === 'ALERTA').length,
-      ok: items.filter((item) => item.status === 'OK').length,
+      ok: items.filter((i) => i.status === 'OK').length,
+      alerta: items.filter((i) => i.status === 'ALERTA').length,
+      faltante: items.filter((i) => i.status === 'FALTANTE').length,
       totalStockEsperado: items.reduce(
         (sum, item) => sum + (Number(item.expectedQuantity) || 0),
         0
@@ -127,10 +115,10 @@ export default function InventoryDayPage() {
     };
   }, [todayInventory]);
 
-  const handleOpenPicker = () => {
-    fileInputRef.current?.click();
-  };
+  // Abrir selector de archivo.
+  const handleOpenPicker = () => fileInputRef.current?.click();
 
+  // Gestión de PDF.
   const handleFileChange = async (event) => {
     const selectedFile = event.target.files?.[0];
     if (!selectedFile) return;
@@ -138,20 +126,22 @@ export default function InventoryDayPage() {
     setUploading(true);
     setError('');
     setSuccess('');
-
     try {
-      const parsedInventory = await parseInventoryPdf(selectedFile);
-      const savedInventory = await saveDailyInventoryFromPdf(
-        parsedInventory,
-        user?.email || ''
-      );
-
-      // Actualizamos el inventario localmente para mostrar feedback inmediato;
-      // luego la suscripción lo volverá a sincronizar si algo cambia en Firestore
-      setTodayInventory(savedInventory);
-      setSuccess(
-        `Inventario del ${parsedInventory.dateLabel} cargado correctamente.`
-      );
+      const parsed = await parseInventoryPdf(selectedFile);
+      // Validamos la fecha del PDF.
+      if (parsed.dateKey !== todayDateKey) {
+        setError(
+          `La fecha del PDF (${parsed.dateLabel}) no coincide con la fecha actual (${todayLabel}).`
+        );
+        setUploading(false);
+        event.target.value = '';
+        return;
+      }
+      // Guardamos el inventario; Firestore se encarga de actualizar o crear.
+      const saved = await saveDailyInventoryFromPdf(parsed, user?.email || '');
+      // Mostramos feedback inmediato; la suscripción se encargará de sincronizar luego.
+      setTodayInventory(saved);
+      setSuccess(`Inventario del ${parsed.dateLabel} cargado correctamente.`);
     } catch (err) {
       console.error(err);
       setError(err.message || 'No se pudo procesar el PDF.');
@@ -161,8 +151,23 @@ export default function InventoryDayPage() {
     }
   };
 
+  // Colores de estado para los productos.
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'OK':
+        return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
+      case 'ALERTA':
+        return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
+      case 'FALTANTE':
+        return 'border-red-900/60 bg-red-950/50 text-red-400';
+      default:
+        return 'border-zinc-800 bg-zinc-900 text-zinc-300';
+    }
+  };
+
   return (
     <div className="space-y-4">
+      {/* Input oculto para cargar el PDF */}
       <input
         ref={fileInputRef}
         type="file"
@@ -171,6 +176,7 @@ export default function InventoryDayPage() {
         onChange={handleFileChange}
       />
 
+      {/* Sección de encabezado y subida de PDF */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
@@ -179,11 +185,9 @@ export default function InventoryDayPage() {
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-7 text-zinc-400 sm:text-base">
               Sube el PDF del día y el sistema agregará automáticamente el
-              inventario con fecha, semana, cedis, categorías, productos,
-              cantidad y no disponible.
+              inventario con fecha, semana, cedis, categorías y productos.
             </p>
           </div>
-
           <button
             onClick={handleOpenPicker}
             disabled={uploading}
@@ -195,18 +199,19 @@ export default function InventoryDayPage() {
         </div>
       </section>
 
+      {/* Mensajes de error o éxito */}
       {error && (
         <div className="rounded-2xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
           {error}
         </div>
       )}
-
       {success && (
         <div className="rounded-2xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
           {success}
         </div>
       )}
 
+      {/* Tarjetas con estadísticas y usuario */}
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
           <div className="flex items-start gap-3">
@@ -269,6 +274,7 @@ export default function InventoryDayPage() {
         </div>
       </section>
 
+      {/* Inventario de hoy con productos y búsqueda */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -280,7 +286,6 @@ export default function InventoryDayPage() {
               actualizará.
             </p>
           </div>
-
           {todayInventory?.id && (
             <Link
               to={`/inventario/${todayInventory.id}`}
@@ -301,6 +306,7 @@ export default function InventoryDayPage() {
           </div>
         ) : (
           <div className="space-y-4">
+            {/* Tarjetas de resumen del inventario */}
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
               <div className="rounded-2xl border border-zinc-800 bg-black p-4">
                 <p className="text-sm text-zinc-400">Fecha</p>
@@ -340,6 +346,7 @@ export default function InventoryDayPage() {
               </div>
             </div>
 
+            {/* Resumen por estado */}
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 p-4">
                 <p className="text-sm text-emerald-400">OK</p>
@@ -354,11 +361,12 @@ export default function InventoryDayPage() {
               <div className="rounded-2xl border border-red-900/60 bg-red-950/40 p-4">
                 <p className="text-sm text-red-400">Faltantes</p>
                 <p className="mt-2 text-2xl font-bold text-white">
-                  {stats.faltantes}
+                  {stats.faltante}
                 </p>
               </div>
             </div>
 
+            {/* Input de búsqueda */}
             <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-black px-4 py-3">
               <Search size={18} className="text-zinc-500" />
               <input
@@ -370,6 +378,7 @@ export default function InventoryDayPage() {
               />
             </div>
 
+            {/* Lista de productos */}
             <div className="space-y-3">
               {filteredItems.length === 0 ? (
                 <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
@@ -393,7 +402,6 @@ export default function InventoryDayPage() {
                           {item.supplierName}
                         </p>
                       </div>
-
                       <span
                         className={`inline-flex items-center rounded-xl border px-3 py-1 text-sm font-medium ${getStatusColor(
                           item.status
@@ -414,7 +422,6 @@ export default function InventoryDayPage() {
                           )}
                         </span>
                       </div>
-
                       <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
                         <span className="block text-xs text-zinc-500">
                           No disponible
@@ -425,7 +432,6 @@ export default function InventoryDayPage() {
                           )}
                         </span>
                       </div>
-
                       <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
                         <span className="block text-xs text-zinc-500">
                           Conteo físico
@@ -434,7 +440,6 @@ export default function InventoryDayPage() {
                           {item.countedQuantity || 'Pendiente'}
                         </span>
                       </div>
-
                       <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
                         <span className="block text-xs text-zinc-500">
                           Observación
@@ -459,6 +464,7 @@ export default function InventoryDayPage() {
         )}
       </section>
 
+      {/* Historial de inventarios con navegación a detalle o edición */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
         <div className="mb-4">
           <h2 className="text-2xl font-bold text-white">
@@ -468,45 +474,57 @@ export default function InventoryDayPage() {
             Inventarios guardados por fecha.
           </p>
         </div>
-
         <div className="space-y-3">
           {allInventories.length === 0 ? (
             <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
               No hay inventarios registrados todavía.
             </div>
           ) : (
-            allInventories.slice(0, 20).map((inventory) => (
-              <div
-                key={inventory.id}
-                className="rounded-2xl border border-zinc-800 bg-black p-4"
-              >
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <p className="font-semibold text-white">
-                      {inventory.date || 'Sin fecha'}
-                    </p>
-                    <p className="mt-1 text-sm text-zinc-400">
-                      Semana {inventory.week || '—'} ·{' '}
-                      {inventory.cedis || 'Sin cedis'}
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      {inventory.items?.length || 0} productos
-                    </p>
+            allInventories.slice(0, 20).map((inv) => {
+              const isToday = inv.dateKey === todayDateKey;
+              return (
+                <div
+                  key={inv.id}
+                  className="rounded-2xl border border-zinc-800 bg-black p-4"
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="font-semibold text-white">
+                        {inv.date || 'Sin fecha'}
+                      </p>
+                      <p className="mt-1 text-sm text-zinc-400">
+                        Semana {inv.week || '—'} · {inv.cedis || 'Sin cedis'}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {inv.items?.length || 0} productos
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Link
+                        to={`/inventario/${inv.id}`}
+                        className="inline-flex items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-2 font-medium text-white transition hover:border-zinc-500"
+                      >
+                        Ver detalle
+                      </Link>
+                      {/* Mostrar botón Editar solo si corresponde al día de hoy */}
+                      {isToday && (
+                        <Link
+                          to={`/inventario/${inv.id}/editar`}
+                          className="inline-flex items-center justify-center rounded-2xl border border-blue-700 bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-500"
+                        >
+                          Editar
+                        </Link>
+                      )}
+                    </div>
                   </div>
-
-                  <Link
-                    to={`/inventario/${inventory.id}`}
-                    className="inline-flex items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-2 font-medium text-white transition hover:border-zinc-500"
-                  >
-                    Ver detalle
-                  </Link>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </section>
 
+      {/* Aviso sobre actualización */}
       <section className="rounded-3xl border border-yellow-900/60 bg-yellow-950/20 p-5">
         <div className="flex gap-3">
           <AlertTriangle className="mt-0.5 text-yellow-400" size={20} />

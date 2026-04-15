@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { CalendarDays, Search, ClipboardList, Package } from 'lucide-react';
 import { subscribeAllInventories } from '../services/inventory';
 
-/**
- * Formatea una fecha ISO a un string legible en español.
- */
+function getTodayDateKey() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function formatDate(dateString) {
   if (!dateString) return 'Sin fecha';
   const date = new Date(dateString);
   if (Number.isNaN(date.getTime())) return 'Fecha inválida';
-  return new Intl.DateTimeFormat('es-MX', {
-    dateStyle: 'medium',
-  }).format(date);
+  return new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium' }).format(date);
 }
 
 export default function InventoryHistoryPage() {
@@ -20,8 +23,8 @@ export default function InventoryHistoryPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const todayDateKey = useMemo(() => getTodayDateKey(), []);
 
-  // Escuchamos en tiempo real los inventarios de Firestore
   useEffect(() => {
     setLoading(true);
     const unsubscribe = subscribeAllInventories((list) => {
@@ -31,7 +34,6 @@ export default function InventoryHistoryPage() {
     return () => unsubscribe();
   }, []);
 
-  // Filtramos según búsqueda
   const filteredInventories = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return inventories;
@@ -98,44 +100,55 @@ export default function InventoryHistoryPage() {
         </section>
       ) : (
         <section className="grid gap-4">
-          {filteredInventories.map((inv) => (
-            <article
-              key={inv.id}
-              className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 md:p-5 transition hover:border-zinc-700"
-            >
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-lg font-semibold text-white md:text-xl">
-                      {formatDate(inv.date)}
-                    </h2>
-                    <span className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300">
-                      {inv.cedis || 'Sin cedis'}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-400 md:flex-row md:flex-wrap md:items-center md:gap-4">
-                    {inv.week && (
-                      <span className="inline-flex items-center gap-2">
-                        <CalendarDays size={16} /> Semana {inv.week}
+          {filteredInventories.map((inv) => {
+            const isToday = inv.dateKey === todayDateKey;
+            return (
+              <article
+                key={inv.id}
+                className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 md:p-5 transition hover:border-zinc-700"
+              >
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-lg font-semibold text-white md:text-xl">
+                        {formatDate(inv.date)}
+                      </h2>
+                      <span className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300">
+                        {inv.cedis || 'Sin cedis'}
                       </span>
+                    </div>
+                    <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-400 md:flex-row md:flex-wrap md:items-center md:gap-4">
+                      {inv.week && (
+                        <span className="inline-flex items-center gap-2">
+                          <CalendarDays size={16} /> Semana {inv.week}
+                        </span>
+                      )}
+                      <span className="inline-flex items-center gap-2">
+                        <ClipboardList size={16} /> {inv.items?.length || 0}{' '}
+                        productos
+                      </span>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex items-center gap-2 md:mt-0">
+                    <button
+                      onClick={() => navigate(`/inventario/${inv.id}`)}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-zinc-800"
+                    >
+                      Ver detalle
+                    </button>
+                    {isToday && (
+                      <button
+                        onClick={() => navigate(`/inventario/${inv.id}/editar`)}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-500"
+                      >
+                        Editar
+                      </button>
                     )}
-                    <span className="inline-flex items-center gap-2">
-                      <ClipboardList size={16} /> {inv.items?.length || 0}{' '}
-                      productos
-                    </span>
                   </div>
                 </div>
-                <div className="mt-4 flex items-center gap-2 md:mt-0">
-                  <button
-                    onClick={() => navigate(`/inventario/${inv.id}`)}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-zinc-800"
-                  >
-                    Ver detalle
-                  </button>
-                </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </section>
       )}
     </div>

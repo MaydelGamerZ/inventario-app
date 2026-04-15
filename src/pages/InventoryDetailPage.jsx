@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
   ArrowLeft,
   Save,
@@ -16,6 +16,7 @@ import {
   saveInventoryDetail,
 } from '../services/inventory';
 
+// ... (funciones auxiliares como formatNow, safeNumber, sumCountEntries, etc.)
 const OBSERVATION_OPTIONS = [
   'Buen estado',
   'Dañado',
@@ -47,41 +48,57 @@ function sumCountEntries(entries = []) {
 function summarizeEntriesByObservation(entries = []) {
   const summary = {};
   for (const entry of entries) {
-    const observation =
+    const obs =
       String(entry.observationType || 'Buen estado').trim() || 'Buen estado';
-    summary[observation] =
-      (summary[observation] || 0) + safeNumber(entry.quantity);
+    summary[obs] = (summary[obs] || 0) + safeNumber(entry.quantity);
   }
   return summary;
 }
 
-function calculateDifference(expectedQuantity, countedQuantity) {
-  return safeNumber(countedQuantity) - safeNumber(expectedQuantity);
+function calculateDifference(expected, counted) {
+  return safeNumber(counted) - safeNumber(expected);
 }
 
 function calculateStatus(item) {
-  const observationSummary = summarizeEntriesByObservation(
-    item.countEntries || []
-  );
+  const obsSummary = summarizeEntriesByObservation(item.countEntries || []);
   const counted = safeNumber(item.countedQuantity);
   const expected = safeNumber(item.expectedQuantity);
   const unavailable = safeNumber(item.unavailableQuantity);
-
   if (counted <= 0) return 'FALTANTE';
-  if ((observationSummary.Caducado || 0) > 0) return 'CADUCADO';
-  if (
-    (observationSummary.Dañado || 0) > 0 ||
-    (observationSummary.Maltratado || 0) > 0
-  ) {
+  if ((obsSummary.Caducado || 0) > 0) return 'CADUCADO';
+  if ((obsSummary.Dañado || 0) > 0 || (obsSummary.Maltratado || 0) > 0)
     return 'DAÑADO';
-  }
-  if (unavailable > 0 || (observationSummary.Exhibición || 0) > 0)
-    return 'ALERTA';
+  if (unavailable > 0 || (obsSummary.Exhibición || 0) > 0) return 'ALERTA';
   if (expected <= 0) return 'FALTANTE';
-
   return 'OK';
 }
 
+function normalizeItem(item) {
+  const countEntries = Array.isArray(item.countEntries)
+    ? item.countEntries
+    : [];
+  const countedQuantity = sumCountEntries(countEntries);
+  const difference = calculateDifference(
+    item.expectedQuantity,
+    countedQuantity
+  );
+  const observationTotals = summarizeEntriesByObservation(countEntries);
+  const normalized = {
+    ...item,
+    expectedQuantity: safeNumber(item.expectedQuantity),
+    unavailableQuantity: safeNumber(item.unavailableQuantity),
+    countedQuantity,
+    total: countedQuantity,
+    difference,
+    observation: item.observation || '',
+    countEntries,
+    observationTotals,
+  };
+  normalized.status = item.status || calculateStatus(normalized);
+  return normalized;
+}
+
+// Determina color para etiquetas de estado en la lista.
 function getStatusColor(status) {
   switch (status) {
     case 'OK':
@@ -118,66 +135,9 @@ function getObservationBadgeColor(label) {
   }
 }
 
-function getProductStateTags(item) {
-  const observationTotals = item.observationTotals || {};
-  const tags = [];
-
-  for (const option of OBSERVATION_OPTIONS) {
-    const qty = safeNumber(observationTotals[option] || 0);
-    if (qty > 0) {
-      tags.push({
-        label: option,
-        quantity: qty,
-      });
-    }
-  }
-
-  if (tags.length === 0) {
-    if (safeNumber(item.unavailableQuantity) > 0) {
-      tags.push({
-        label: 'No disponible',
-        quantity: safeNumber(item.unavailableQuantity),
-      });
-    } else {
-      tags.push({
-        label: item.status || 'OK',
-        quantity: safeNumber(item.countedQuantity || 0),
-      });
-    }
-  }
-  return tags;
-}
-
-// Normaliza un item de Firestore para uso en el frontend
-function normalizeItem(item) {
-  const countEntries = Array.isArray(item.countEntries)
-    ? item.countEntries
-    : [];
-  const countedQuantity = sumCountEntries(countEntries);
-  const difference = calculateDifference(
-    item.expectedQuantity,
-    countedQuantity
-  );
-  const observationTotals = summarizeEntriesByObservation(countEntries);
-
-  const normalized = {
-    ...item,
-    expectedQuantity: safeNumber(item.expectedQuantity),
-    unavailableQuantity: safeNumber(item.unavailableQuantity),
-    countedQuantity,
-    total: countedQuantity,
-    difference,
-    observation: item.observation || '',
-    countEntries,
-    observationTotals,
-  };
-
-  normalized.status = item.status || calculateStatus(normalized);
-  return normalized;
-}
-
 export default function InventoryDetailPage() {
   const { id } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
 
   const [inventory, setInventory] = useState(null);
@@ -191,12 +151,23 @@ export default function InventoryDetailPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Suscripción en tiempo real al inventario por id
+  // Verifica si estamos en la ruta /inventario/:id/editar
+  const isEditRoute = location.pathname.endsWith('/editar');
+
+  // Calcula dateKey de hoy
+  const todayDateKey = useMemo(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }, []);
+
+  // Suscripción al inventario por ID
   useEffect(() => {
     setLoading(true);
-
-    const unsubscribe = subscribeInventoryById(id, (inventoryData) => {
-      if (!inventoryData) {
+    const unsubscribe = subscribeInventoryById(id, (data) => {
+      if (!data) {
         setInventory(null);
         setItems([]);
         setNotes('');
@@ -204,30 +175,37 @@ export default function InventoryDetailPage() {
         setLoading(false);
         return;
       }
-
-      const normalizedItems = Array.isArray(inventoryData.items)
-        ? inventoryData.items.map(normalizeItem)
+      const normalizedItems = Array.isArray(data.items)
+        ? data.items.map(normalizeItem)
         : [];
-
-      setInventory(inventoryData);
+      setInventory(data);
       setItems(normalizedItems);
-      setNotes(inventoryData.notes || '');
-
-      const initialExpanded = {};
-      normalizedItems.forEach((_, index) => {
-        initialExpanded[index] = index === 0;
+      setNotes(data.notes || '');
+      // Por defecto, expandimos solo el primer item.
+      const expandedInit = {};
+      normalizedItems.forEach((_, idx) => {
+        expandedInit[idx] = idx === 0;
       });
-      setExpandedItems(initialExpanded);
+      setExpandedItems(expandedInit);
       setLoading(false);
     });
-
     return () => unsubscribe();
   }, [id]);
 
+  // Determina si se puede editar: debe ser la ruta /editar y la fecha ser hoy.
+  const canEdit = useMemo(() => {
+    return isEditRoute && inventory?.dateKey === todayDateKey;
+  }, [isEditRoute, inventory, todayDateKey]);
+
+  // También se mostrará un botón Editar en modo lectura si es la fecha de hoy.
+  const showEditButton = useMemo(() => {
+    return !isEditRoute && inventory?.dateKey === todayDateKey;
+  }, [isEditRoute, inventory, todayDateKey]);
+
+  // Filtrado de productos por búsqueda.
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return items;
-
     return items.filter((item) => {
       return (
         item.productName?.toLowerCase().includes(term) ||
@@ -238,22 +216,23 @@ export default function InventoryDetailPage() {
     });
   }, [items, search]);
 
+  // Resumen por estado.
   const summary = useMemo(() => {
     return {
       total: items.length,
-      ok: items.filter((item) => item.status === 'OK').length,
-      alerta: items.filter((item) => item.status === 'ALERTA').length,
-      faltante: items.filter((item) => item.status === 'FALTANTE').length,
-      danado: items.filter((item) => item.status === 'DAÑADO').length,
-      caducado: items.filter((item) => item.status === 'CADUCADO').length,
+      ok: items.filter((it) => it.status === 'OK').length,
+      alerta: items.filter((it) => it.status === 'ALERTA').length,
+      faltante: items.filter((it) => it.status === 'FALTANTE').length,
+      danado: items.filter((it) => it.status === 'DAÑADO').length,
+      caducado: items.filter((it) => it.status === 'CADUCADO').length,
     };
   }, [items]);
 
-  function updateItem(index, updater) {
+  // Actualizar un item.
+  const updateItem = (index, updater) => {
     setItems((prev) =>
-      prev.map((item, itemIndex) => {
-        if (itemIndex !== index) return item;
-
+      prev.map((item, idx) => {
+        if (idx !== index) return item;
         const updated =
           typeof updater === 'function'
             ? updater(item)
@@ -261,8 +240,9 @@ export default function InventoryDetailPage() {
         return normalizeItem(updated);
       })
     );
-  }
+  };
 
+  // Gestionar borradores de entrada.
   const handleDraftChange = (index, field, value) => {
     setEntryDrafts((prev) => ({
       ...prev,
@@ -275,37 +255,33 @@ export default function InventoryDetailPage() {
     }));
   };
 
+  // Agregar conteo a un producto.
   const handleAddCountEntry = (index) => {
     const draft = entryDrafts[index] || {
       quantity: '',
       comment: '',
       observationType: 'Buen estado',
     };
-
-    const quantity = safeNumber(draft.quantity);
-
-    if (quantity <= 0) {
+    const qty = safeNumber(draft.quantity);
+    if (qty <= 0) {
       setError('La cantidad del conteo debe ser mayor a cero.');
       return;
     }
-
     setError('');
     setSuccess('');
-
     updateItem(index, (item) => ({
       ...item,
       countEntries: [
         ...(item.countEntries || []),
         {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          quantity,
+          quantity: qty,
           comment: String(draft.comment || '').trim(),
           observationType: String(draft.observationType || 'Buen estado'),
           createdAt: formatNow(),
         },
       ],
     }));
-
     setEntryDrafts((prev) => ({
       ...prev,
       [index]: {
@@ -316,10 +292,10 @@ export default function InventoryDetailPage() {
     }));
   };
 
+  // Eliminar un conteo de un producto.
   const handleDeleteCountEntry = (itemIndex, entryId) => {
     setError('');
     setSuccess('');
-
     updateItem(itemIndex, (item) => ({
       ...item,
       countEntries: (item.countEntries || []).filter(
@@ -328,34 +304,18 @@ export default function InventoryDetailPage() {
     }));
   };
 
-  const toggleExpanded = (index) => {
-    setExpandedItems((prev) => ({
-      ...prev,
-      [index]: !prev[index],
-    }));
-  };
-
-  // Guarda el inventario sin sobreescribir los conteos
+  // Guardar inventario.
   const handleSave = async () => {
     if (!inventory?.id) return;
-
     try {
       setSaving(true);
       setError('');
       setSuccess('');
-
-      const normalizedItems = items.map((item) => normalizeItem(item));
-
+      const normalizedItems = items.map((it) => normalizeItem(it));
       await saveInventoryDetail(inventory.id, normalizedItems, notes);
-
-      // Actualizamos el estado local inmediatamente.
-      setInventory((prev) => ({
-        ...prev,
-        items: normalizedItems,
-        notes,
-      }));
+      // Actualizamos localmente
+      setInventory((prev) => ({ ...prev, items: normalizedItems, notes }));
       setItems(normalizedItems);
-
       setSuccess('Inventario actualizado correctamente.');
     } catch (err) {
       console.error(err);
@@ -397,8 +357,10 @@ export default function InventoryDetailPage() {
     );
   }
 
+  // Renderizado principal
   return (
     <div className="space-y-4">
+      {/* Encabezado con título y botones */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
@@ -411,7 +373,7 @@ export default function InventoryDetailPage() {
               </button>
               <div>
                 <p className="text-sm font-medium text-blue-400">
-                  Detalle de inventario
+                  {canEdit ? 'Editar inventario' : 'Detalle de inventario'}
                 </p>
                 <h1 className="text-3xl font-bold text-white">
                   Conteo del inventario
@@ -419,21 +381,38 @@ export default function InventoryDetailPage() {
               </div>
             </div>
             <p className="text-sm leading-7 text-zinc-400">
-              Cada producto puede tener varios conteos y cada conteo se
-              clasifica por observación.
+              {canEdit
+                ? 'Puedes modificar los conteos y observaciones.'
+                : showEditButton
+                  ? 'Este inventario corresponde al día de hoy; pulsa en Editar para modificar.'
+                  : 'No puedes modificar los inventarios de días anteriores.'}
             </p>
           </div>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Save size={18} />
-            {saving ? 'Guardando...' : 'Guardar inventario'}
-          </button>
+          {/* Mostrar botón Guardar solo en modo edición */}
+          {canEdit && (
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Save size={18} />
+              {saving ? 'Guardando...' : 'Guardar inventario'}
+            </button>
+          )}
+          {/* Mostrar botón Editar en modo lectura si es la fecha de hoy */}
+          {showEditButton && (
+            <Link
+              to={`/inventario/${inventory.id}/editar`}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500"
+            >
+              <Save size={18} />
+              Editar
+            </Link>
+          )}
         </div>
       </section>
 
+      {/* Mensajes de error o éxito */}
       {error && (
         <div className="rounded-2xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
           {error}
@@ -445,6 +424,7 @@ export default function InventoryDetailPage() {
         </div>
       )}
 
+      {/* Tarjetas con información general */}
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
           <p className="text-sm text-zinc-400">Fecha</p>
@@ -472,6 +452,7 @@ export default function InventoryDetailPage() {
         </div>
       </section>
 
+      {/* Resumen por estado */}
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
           <p className="text-sm text-zinc-400">Total</p>
@@ -503,12 +484,13 @@ export default function InventoryDetailPage() {
         </div>
         <div className="rounded-2xl border border-orange-900/60 bg-orange-950/40 p-4">
           <p className="text-sm text-orange-400">Caducados</p>
-          <p className="mt-1 text-2xl font-semibold text-white">
+          <p className="mt-1 text-2x font-semibold text-white">
             {summary.caducado}
           </p>
         </div>
       </section>
 
+      {/* Productos del inventario */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
         <div className="mb-4 flex items-center gap-3">
           <ClipboardList size={20} className="text-blue-400" />
@@ -516,7 +498,7 @@ export default function InventoryDetailPage() {
             Productos del inventario
           </h2>
         </div>
-
+        {/* Input búsqueda */}
         <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-black px-4 py-3">
           <Search size={18} className="text-zinc-500" />
           <input
@@ -528,6 +510,7 @@ export default function InventoryDetailPage() {
           />
         </div>
 
+        {/* Listado de productos */}
         <div className="mt-4 space-y-3">
           {filteredItems.length === 0 ? (
             <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
@@ -535,31 +518,53 @@ export default function InventoryDetailPage() {
             </div>
           ) : (
             filteredItems.map((item) => {
-              // Encontramos el índice real en la lista original para que los drafts coincidan
+              // Para encontrar el índice real del item en la lista original
               const realIndex = items.findIndex(
-                (sourceItem) =>
-                  sourceItem.productName === item.productName &&
-                  sourceItem.categoryCode === item.categoryCode &&
-                  sourceItem.supplierCode === item.supplierCode
+                (it) =>
+                  it.productName === item.productName &&
+                  it.categoryCode === item.categoryCode &&
+                  it.supplierCode === item.supplierCode
               );
-
               const draft = entryDrafts[realIndex] || {
                 quantity: '',
                 comment: '',
                 observationType: 'Buen estado',
               };
-
               const isExpanded = !!expandedItems[realIndex];
               const observationTotals = item.observationTotals || {};
-              const stateTags = getProductStateTags(item);
+              // Construye etiquetas de estado en función de la observación o no disponible
+              const stateTags = [];
+              for (const opt of OBSERVATION_OPTIONS) {
+                const qty = safeNumber(observationTotals[opt] || 0);
+                if (qty > 0) stateTags.push({ label: opt, quantity: qty });
+              }
+              if (stateTags.length === 0) {
+                if (safeNumber(item.unavailableQuantity) > 0) {
+                  stateTags.push({
+                    label: 'No disponible',
+                    quantity: safeNumber(item.unavailableQuantity),
+                  });
+                } else {
+                  stateTags.push({
+                    label: item.status || 'OK',
+                    quantity: safeNumber(item.countedQuantity || 0),
+                  });
+                }
+              }
 
               return (
                 <div
                   key={`${item.productName}-${item.categoryCode}-${item.supplierCode}-${realIndex}`}
                   className="overflow-hidden rounded-2xl border border-zinc-800 bg-black"
                 >
+                  {/* Cabecera del producto */}
                   <button
-                    onClick={() => toggleExpanded(realIndex)}
+                    onClick={() =>
+                      setExpandedItems((prev) => ({
+                        ...prev,
+                        [realIndex]: !prev[realIndex],
+                      }))
+                    }
                     className="flex w-full items-center justify-between px-4 py-4 text-left transition hover:bg-zinc-950"
                   >
                     <div className="min-w-0">
@@ -595,8 +600,10 @@ export default function InventoryDetailPage() {
                     </div>
                   </button>
 
+                  {/* Contenido desplegable */}
                   {isExpanded && (
                     <div className="border-t border-zinc-800 px-4 py-4">
+                      {/* Resumen del producto */}
                       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
                           <span className="block text-xs text-zinc-500">
@@ -632,90 +639,94 @@ export default function InventoryDetailPage() {
                         </div>
                       </div>
 
-                      <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-                        <p className="mb-3 text-sm font-semibold text-white">
-                          Agregar conteo
-                        </p>
-                        <div className="grid gap-3 md:grid-cols-[140px_1fr_220px_auto]">
-                          <input
-                            type="number"
-                            value={draft.quantity}
-                            onChange={(e) =>
-                              handleDraftChange(
-                                realIndex,
-                                'quantity',
-                                e.target.value
-                              )
-                            }
-                            placeholder="Cantidad"
-                            className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                          />
-                          <input
-                            type="text"
-                            value={draft.comment}
-                            onChange={(e) =>
-                              handleDraftChange(
-                                realIndex,
-                                'comment',
-                                e.target.value
-                              )
-                            }
-                            placeholder="Comentario: tarima A, exhibición, pasillo..."
-                            className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                          />
-                          <select
-                            value={draft.observationType}
-                            onChange={(e) =>
-                              handleDraftChange(
-                                realIndex,
-                                'observationType',
-                                e.target.value
-                              )
-                            }
-                            className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                          >
-                            {OBSERVATION_OPTIONS.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            onClick={() => handleAddCountEntry(realIndex)}
-                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500"
-                          >
-                            <Plus size={16} />
-                            Agregar
-                          </button>
+                      {/* Sección para agregar conteo (solo si se puede editar) */}
+                      {canEdit && (
+                        <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                          <p className="mb-3 text-sm font-semibold text-white">
+                            Agregar conteo
+                          </p>
+                          <div className="grid gap-3 md:grid-cols-[140px_1fr_220px_auto]">
+                            <input
+                              type="number"
+                              value={draft.quantity}
+                              onChange={(e) =>
+                                handleDraftChange(
+                                  realIndex,
+                                  'quantity',
+                                  e.target.value
+                                )
+                              }
+                              placeholder="Cantidad"
+                              className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
+                            />
+                            <input
+                              type="text"
+                              value={draft.comment}
+                              onChange={(e) =>
+                                handleDraftChange(
+                                  realIndex,
+                                  'comment',
+                                  e.target.value
+                                )
+                              }
+                              placeholder="Comentario"
+                              className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
+                            />
+                            <select
+                              value={draft.observationType}
+                              onChange={(e) =>
+                                handleDraftChange(
+                                  realIndex,
+                                  'observationType',
+                                  e.target.value
+                                )
+                              }
+                              className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
+                            >
+                              {OBSERVATION_OPTIONS.map((opt) => (
+                                <option key={opt} value={opt}>
+                                  {opt}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => handleAddCountEntry(realIndex)}
+                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500"
+                            >
+                              <Plus size={16} />
+                              Agregar
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
+                      {/* Resumen por observación */}
                       <div className="mt-4">
                         <p className="mb-2 text-sm font-semibold text-white">
                           Resumen por observación
                         </p>
                         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                           {OBSERVATION_OPTIONS.filter(
-                            (option) => (observationTotals[option] || 0) > 0
+                            (opt) => (observationTotals[opt] || 0) > 0
                           ).length === 0 ? (
                             <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-400">
                               Aún no hay observaciones registradas.
                             </div>
                           ) : (
                             OBSERVATION_OPTIONS.filter(
-                              (option) => (observationTotals[option] || 0) > 0
-                            ).map((option) => (
+                              (opt) => (observationTotals[opt] || 0) > 0
+                            ).map((opt) => (
                               <div
-                                key={option}
+                                key={opt}
                                 className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3"
                               >
                                 <span className="block text-xs text-zinc-500">
-                                  {option}
+                                  {opt}
                                 </span>
                                 <span className="text-zinc-200">
-                                  {(
-                                    observationTotals[option] || 0
-                                  ).toLocaleString('es-MX')}
+                                  {(observationTotals[opt] || 0).toLocaleString(
+                                    'es-MX'
+                                  )}
                                 </span>
                               </div>
                             ))
@@ -723,6 +734,7 @@ export default function InventoryDetailPage() {
                         </div>
                       </div>
 
+                      {/* Historial de conteos */}
                       <div className="mt-4 space-y-2">
                         <p className="text-sm font-semibold text-white">
                           Historial de conteos
@@ -753,15 +765,18 @@ export default function InventoryDetailPage() {
                                   {entry.createdAt || 'Sin fecha'}
                                 </p>
                               </div>
-                              <button
-                                onClick={() =>
-                                  handleDeleteCountEntry(realIndex, entry.id)
-                                }
-                                className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-900 bg-red-950/40 px-4 py-2 font-medium text-red-300 transition hover:bg-red-900/40"
-                              >
-                                <Trash2 size={16} />
-                                Eliminar
-                              </button>
+                              {/* Mostrar botón Eliminar solo en modo edición */}
+                              {canEdit && (
+                                <button
+                                  onClick={() =>
+                                    handleDeleteCountEntry(realIndex, entry.id)
+                                  }
+                                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-900 bg-red-950/40 px-4 py-2 font-medium text-red-300 transition hover:bg-red-900/40"
+                                >
+                                  <Trash2 size={16} />
+                                  Eliminar
+                                </button>
+                              )}
                             </div>
                           ))
                         )}
@@ -775,6 +790,7 @@ export default function InventoryDetailPage() {
         </div>
       </section>
 
+      {/* Notas generales */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
         <div className="mb-3 flex items-center gap-3">
           <AlertTriangle size={18} className="text-yellow-400" />
@@ -786,6 +802,7 @@ export default function InventoryDetailPage() {
           rows={5}
           placeholder="Escribe aquí observaciones generales del inventario..."
           className="w-full rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-white outline-none transition focus:border-blue-500"
+          readOnly={!canEdit}
         />
       </section>
     </div>
