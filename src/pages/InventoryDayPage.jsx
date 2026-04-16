@@ -15,6 +15,9 @@ import {
   Play,
   Pencil,
   Upload,
+  ExternalLink,
+  Copy,
+  Smartphone,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { parseInventoryPdf } from '../services/pdfInventoryParser';
@@ -146,25 +149,91 @@ function getInventoryStatusLabel(inventory) {
   return 'Cargado';
 }
 
-function isIosStandalone() {
-  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+function isStandaloneDisplayMode() {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return (
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(display-mode: standalone)').matches
+    );
+  } catch {
     return false;
   }
+}
 
-  const standalone =
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(display-mode: standalone)').matches;
+function isLegacyNavigatorStandalone() {
+  if (typeof navigator === 'undefined') return false;
+  return typeof navigator.standalone === 'boolean' && navigator.standalone;
+}
 
-  const legacyStandalone =
-    typeof navigator.standalone === 'boolean' ? navigator.standalone : false;
+function isAppleMobileDevice() {
+  if (typeof navigator === 'undefined') return false;
 
-  return Boolean(standalone || legacyStandalone);
+  const ua = navigator.userAgent || '';
+  const platform = navigator.platform || '';
+  const maxTouchPoints = navigator.maxTouchPoints || 0;
+
+  const isiPhoneOrIPad =
+    /iPhone|iPad|iPod/i.test(ua) || /iPhone|iPad|iPod/i.test(platform);
+
+  const isModernIPadOnMac =
+    /Mac/i.test(platform) && maxTouchPoints > 1;
+
+  return isiPhoneOrIPad || isModernIPadOnMac;
+}
+
+function isIosStandalone() {
+  return isAppleMobileDevice() && (isStandaloneDisplayMode() || isLegacyNavigatorStandalone());
+}
+
+function isProbablyPdf(file) {
+  if (!file) return false;
+
+  const name = String(file.name || '').toLowerCase();
+  const type = String(file.type || '').toLowerCase();
+
+  if (type === 'application/pdf') return true;
+  if (name.endsWith('.pdf')) return true;
+
+  return false;
+}
+
+async function copyTextToClipboard(text) {
+  if (!text) return false;
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // continúa al fallback
+  }
+
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.setAttribute('readonly', '');
+    textArea.style.position = 'fixed';
+    textArea.style.top = '-9999px';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const success = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    return success;
+  } catch {
+    return false;
+  }
 }
 
 export default function InventoryDayPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const previousStatusRef = useRef('');
+  const uploadInputRef = useRef(null);
 
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayLabel = useMemo(
@@ -183,6 +252,10 @@ export default function InventoryDayPage() {
   const [search, setSearch] = useState('');
   const [saveNotice, setSaveNotice] = useState('');
   const [iosUploadHelp, setIosUploadHelp] = useState(false);
+  const [copySuccess, setCopySuccess] = useState('');
+  const [selectedFileName, setSelectedFileName] = useState('');
+
+  const showIosStandaloneHelp = isIosStandalone();
 
   useEffect(() => {
     setLoadingToday(true);
@@ -276,23 +349,32 @@ export default function InventoryDayPage() {
   const isDraft = todayInventory?.status === 'BORRADOR';
   const hasInventory = !!todayInventory;
   const isCountStarted = Boolean(todayInventory?.countingStarted);
-  const showIosStandaloneHelp = isIosStandalone();
 
   const resetMessages = () => {
     setError('');
     setSuccess('');
     setSaveNotice('');
+    setCopySuccess('');
   };
 
-  const handleFileChange = async (event) => {
-    const selectedFile = event.target.files?.[0];
+  const clearFileInput = () => {
+    if (uploadInputRef.current) {
+      uploadInputRef.current.value = '';
+    }
+  };
+
+  const processSelectedFile = async (selectedFile) => {
     if (!selectedFile) return;
 
     resetMessages();
-    setIosUploadHelp(false);
+    setSelectedFileName(selectedFile.name || '');
     setUploading(true);
 
     try {
+      if (!isProbablyPdf(selectedFile)) {
+        throw new Error('El archivo seleccionado no parece ser un PDF válido.');
+      }
+
       const parsed = await parseInventoryPdf(selectedFile);
 
       if (!parsed) {
@@ -315,23 +397,44 @@ export default function InventoryDayPage() {
           ? err.message
           : 'No se pudo procesar el PDF en este dispositivo.';
 
+      const normalizedMessage = rawMessage.toLowerCase();
+
       if (
-        /undefined is not a function/i.test(rawMessage) ||
-        /not a function/i.test(rawMessage)
+        normalizedMessage.includes('undefined is not a function') ||
+        normalizedMessage.includes('not a function') ||
+        normalizedMessage.includes('failed to fetch') ||
+        normalizedMessage.includes('load failed') ||
+        normalizedMessage.includes('the operation is not supported') ||
+        normalizedMessage.includes('webkit') ||
+        normalizedMessage.includes('safari')
       ) {
         setError(
-          'Este navegador móvil tuvo un problema al leer el PDF. Intenta abrir la app en Safari normal o en Chrome actualizado, o vuelve a seleccionar el archivo.'
+          'Este iPhone tuvo un problema al leer el PDF desde la app instalada. Intenta abrir esta misma página en Safari normal y volver a seleccionar el archivo.'
         );
+        setIosUploadHelp(true);
       } else {
         setError(rawMessage);
       }
     } finally {
       setUploading(false);
-
-      if (event.target) {
-        event.target.value = '';
-      }
+      clearFileInput();
     }
+  };
+
+  const handleFileChange = async (event) => {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) return;
+    await processSelectedFile(selectedFile);
+  };
+
+  const handleUploadButtonClick = () => {
+    resetMessages();
+
+    if (showIosStandaloneHelp) {
+      setIosUploadHelp(true);
+    }
+
+    uploadInputRef.current?.click();
   };
 
   const handleInputPointerDown = () => {
@@ -339,6 +442,24 @@ export default function InventoryDayPage() {
 
     if (showIosStandaloneHelp) {
       setIosUploadHelp(true);
+    }
+  };
+
+  const handleOpenInBrowser = () => {
+    try {
+      window.open(window.location.href, '_blank', 'noopener,noreferrer');
+    } catch {
+      window.location.href = window.location.href;
+    }
+  };
+
+  const handleCopyLink = async () => {
+    const ok = await copyTextToClipboard(window.location.href);
+
+    if (ok) {
+      setCopySuccess('Enlace copiado. Ábrelo en Safari normal.');
+    } else {
+      setCopySuccess('No se pudo copiar el enlace automáticamente.');
     }
   };
 
@@ -377,8 +498,11 @@ export default function InventoryDayPage() {
           </div>
 
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:min-w-[320px]">
-            <label
-              className={`relative inline-flex min-h-[52px] cursor-pointer items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 ${
+            <button
+              type="button"
+              onClick={handleUploadButtonClick}
+              disabled={uploading}
+              className={`inline-flex min-h-[52px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 ${
                 uploading ? 'pointer-events-none opacity-60' : ''
               }`}
             >
@@ -388,42 +512,82 @@ export default function InventoryDayPage() {
                 <FileUp size={18} />
               )}
               {uploading ? 'Procesando PDF...' : 'Subir PDF del día'}
+            </button>
 
-              <input
-                type="file"
-                accept="application/pdf,.pdf"
-                onChange={handleFileChange}
-                onPointerDown={handleInputPointerDown}
-                onTouchStart={handleInputPointerDown}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-              />
-            </label>
-
-            <label
-              className={`relative inline-flex min-h-[52px] cursor-pointer items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-5 py-3 font-semibold text-white transition hover:bg-zinc-800 ${
+            <button
+              type="button"
+              onClick={handleUploadButtonClick}
+              disabled={uploading}
+              className={`inline-flex min-h-[52px] items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-5 py-3 font-semibold text-white transition hover:bg-zinc-800 ${
                 uploading ? 'pointer-events-none opacity-60' : ''
               }`}
             >
               <Upload size={18} />
               Elegir archivo
+            </button>
 
-              <input
-                type="file"
-                accept="application/pdf,.pdf"
-                onChange={handleFileChange}
-                onPointerDown={handleInputPointerDown}
-                onTouchStart={handleInputPointerDown}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-              />
-            </label>
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              onChange={handleFileChange}
+              onPointerDown={handleInputPointerDown}
+              onTouchStart={handleInputPointerDown}
+              className="sr-only"
+              aria-label="Seleccionar PDF del inventario"
+            />
+
+            {selectedFileName && (
+              <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-sm text-zinc-300">
+                Archivo seleccionado: <span className="font-medium text-white">{selectedFileName}</span>
+              </div>
+            )}
           </div>
         </div>
       </section>
 
-      {showIosStandaloneHelp && iosUploadHelp && (
-        <section className="rounded-2xl border border-yellow-900/60 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-100">
-          En iPhone como app web, el selector de archivos puede fallar según iOS.
-          Si no abre, prueba abrir esta misma página en Safari o Chrome normal.
+      {showIosStandaloneHelp && (
+        <section className="rounded-2xl border border-yellow-900/60 bg-yellow-950/30 px-4 py-4 text-sm text-yellow-100">
+          <div className="flex items-start gap-3">
+            <Smartphone className="mt-0.5 shrink-0 text-yellow-400" size={18} />
+            <div className="space-y-3">
+              <p>
+                En iPhone como app web, la selección de archivos puede fallar.
+                Si no abre el selector o no lee el PDF, usa esta misma página en
+                Safari normal.
+              </p>
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={handleOpenInBrowser}
+                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-yellow-700 bg-yellow-500/10 px-4 py-2 font-medium text-yellow-100 transition hover:bg-yellow-500/20"
+                >
+                  <ExternalLink size={16} />
+                  Abrir en navegador
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 font-medium text-white transition hover:bg-zinc-800"
+                >
+                  <Copy size={16} />
+                  Copiar enlace
+                </button>
+              </div>
+
+              {copySuccess && (
+                <p className="text-xs text-yellow-200">{copySuccess}</p>
+              )}
+
+              {iosUploadHelp && (
+                <p className="text-xs text-yellow-200">
+                  Consejo: en iPhone, abre el enlace en Safari normal y sube el PDF desde ahí.
+                </p>
+              )}
+            </div>
+          </div>
         </section>
       )}
 
