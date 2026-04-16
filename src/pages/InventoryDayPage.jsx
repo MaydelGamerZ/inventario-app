@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   CalendarDays,
   FileUp,
@@ -12,7 +12,9 @@ import {
   Loader2,
   CheckCircle2,
   FolderOpen,
-  History,
+  Bell,
+  Play,
+  Pencil,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { parseInventoryPdf } from '../services/pdfInventoryParser';
@@ -20,12 +22,10 @@ import {
   saveDailyInventoryFromPdf,
   subscribeInventoryByDate,
   subscribeAllInventories,
+  startInventoryCount,
 } from '../services/inventory';
 import { exportInventoryToPDF } from '../services/pdfExporter';
 
-/**
- * Devuelve la fecha actual en formato yyyy-mm-dd.
- */
 function getTodayDateKey() {
   const now = new Date();
   const year = now.getFullYear();
@@ -34,9 +34,6 @@ function getTodayDateKey() {
   return `${year}-${month}-${day}`;
 }
 
-/**
- * Convierte un dateKey (yyyy-mm-dd) a una etiqueta en español.
- */
 function formatDateLabelFromKey(dateKey) {
   if (!dateKey) return 'Sin fecha';
 
@@ -54,25 +51,111 @@ function formatDateLabelFromKey(dateKey) {
   }).format(date);
 }
 
-/**
- * Da color visual al estado del producto.
- */
-function getStatusClasses(status) {
-  switch (status) {
-    case 'OK':
+function safeNumber(value) {
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function summarizeEntries(entries = []) {
+  const summary = {};
+
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const label = String(entry?.observationType || 'Buen estado').trim() || 'Buen estado';
+    summary[label] = (summary[label] || 0) + safeNumber(entry?.quantity);
+  }
+
+  return summary;
+}
+
+function getCountedQuantity(item) {
+  const entries = Array.isArray(item?.countEntries) ? item.countEntries : [];
+  if (entries.length > 0) {
+    return entries.reduce((sum, entry) => sum + safeNumber(entry?.quantity), 0);
+  }
+
+  return safeNumber(item?.countedQuantity);
+}
+
+function buildItemTags(item) {
+  const tags = [];
+  const observationTotals = summarizeEntries(item?.countEntries || []);
+  const expected = safeNumber(item?.expectedQuantity);
+  const counted = getCountedQuantity(item);
+  const difference = counted - expected;
+
+  Object.entries(observationTotals).forEach(([label, quantity]) => {
+    if (safeNumber(quantity) > 0) {
+      tags.push({
+        label,
+        quantity: safeNumber(quantity),
+      });
+    }
+  });
+
+  if (counted <= 0) {
+    tags.push({
+      label: 'Faltante',
+      quantity: expected > 0 ? expected : 0,
+    });
+  }
+
+  if (difference > 0) {
+    tags.push({
+      label: 'Sobrante',
+      quantity: difference,
+    });
+  }
+
+  if (difference < 0 && counted > 0) {
+    tags.push({
+      label: 'Faltante',
+      quantity: Math.abs(difference),
+    });
+  }
+
+  return tags;
+}
+
+function getTagClasses(label) {
+  switch (String(label).toLowerCase()) {
+    case 'buen estado':
       return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
-    case 'ALERTA':
+    case 'caducado':
+      return 'border-orange-900/60 bg-orange-950/50 text-orange-400';
+    case 'dañado':
+    case 'maltratado':
+      return 'border-zinc-700 bg-zinc-900 text-zinc-300';
+    case 'exhibición':
+    case 'exhibicion':
       return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
-    case 'FALTANTE':
+    case 'faltante':
       return 'border-red-900/60 bg-red-950/50 text-red-400';
+    case 'sobrante':
+      return 'border-blue-900/60 bg-blue-950/50 text-blue-400';
     default:
       return 'border-zinc-800 bg-zinc-900 text-zinc-300';
   }
 }
 
+function getInventoryStatusLabel(inventory) {
+  if (!inventory) return 'Pendiente';
+
+  if (inventory.status === 'GUARDADO') {
+    return 'Guardado';
+  }
+
+  if (inventory.countingStarted) {
+    return 'Conteo en proceso';
+  }
+
+  return 'Cargado';
+}
+
 export default function InventoryDayPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const fileInputRef = useRef(null);
+  const previousStatusRef = useRef('');
 
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayLabel = useMemo(
@@ -85,9 +168,11 @@ export default function InventoryDayPage() {
   const [loadingToday, setLoadingToday] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [startingCount, setStartingCount] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
+  const [saveNotice, setSaveNotice] = useState('');
 
   useEffect(() => {
     setLoadingToday(true);
@@ -109,6 +194,31 @@ export default function InventoryDayPage() {
     };
   }, [todayDateKey]);
 
+  useEffect(() => {
+    if (!todayInventory) {
+      previousStatusRef.current = '';
+      return;
+    }
+
+    const currentStatus = todayInventory.status || '';
+    const previousStatus = previousStatusRef.current;
+
+    if (
+      previousStatus &&
+      previousStatus !== 'GUARDADO' &&
+      currentStatus === 'GUARDADO'
+    ) {
+      const whoSaved =
+        todayInventory.finalizedByEmail ||
+        todayInventory.savedByEmail ||
+        'Otro usuario';
+
+      setSaveNotice(`${whoSaved} guardó el conteo final.`);
+    }
+
+    previousStatusRef.current = currentStatus;
+  }, [todayInventory]);
+
   const filteredItems = useMemo(() => {
     const items = todayInventory?.items || [];
     const term = search.trim().toLowerCase();
@@ -116,11 +226,16 @@ export default function InventoryDayPage() {
     if (!term) return items;
 
     return items.filter((item) => {
+      const observationLabels = Object.keys(summarizeEntries(item?.countEntries || []))
+        .join(' ')
+        .toLowerCase();
+
       return (
         item.productName?.toLowerCase().includes(term) ||
         item.categoryName?.toLowerCase().includes(term) ||
         item.supplierName?.toLowerCase().includes(term) ||
-        item.observation?.toLowerCase().includes(term)
+        observationLabels.includes(term) ||
+        item.status?.toLowerCase().includes(term)
       );
     });
   }, [todayInventory, search]);
@@ -135,24 +250,20 @@ export default function InventoryDayPage() {
       alerta: items.filter((i) => i.status === 'ALERTA').length,
       faltante: items.filter((i) => i.status === 'FALTANTE').length,
       totalStockEsperado: items.reduce(
-        (sum, item) => sum + (Number(item.expectedQuantity) || 0),
+        (sum, item) => sum + safeNumber(item.expectedQuantity),
         0
       ),
       totalNoDisponible: items.reduce(
-        (sum, item) => sum + (Number(item.unavailableQuantity) || 0),
+        (sum, item) => sum + safeNumber(item.unavailableQuantity),
         0
       ),
     };
   }, [todayInventory]);
 
-  const hasCountedItems = useMemo(() => {
-    const items = todayInventory?.items || [];
-    return items.some(
-      (item) =>
-        item.countedQuantity != null &&
-        String(item.countedQuantity).trim() !== ''
-    );
-  }, [todayInventory]);
+  const canDownload = todayInventory?.status === 'GUARDADO';
+  const isDraft = todayInventory?.status === 'BORRADOR';
+  const hasInventory = !!todayInventory;
+  const isCountStarted = Boolean(todayInventory?.countingStarted);
 
   const openFilePicker = () => {
     fileInputRef.current?.click();
@@ -164,6 +275,7 @@ export default function InventoryDayPage() {
 
     setError('');
     setSuccess('');
+    setSaveNotice('');
 
     if (selectedFile.type !== 'application/pdf') {
       setError('El archivo seleccionado no es un PDF válido.');
@@ -187,9 +299,7 @@ export default function InventoryDayPage() {
         return;
       }
 
-      const saved = await saveDailyInventoryFromPdf(parsed, user?.email || '');
-      setTodayInventory(saved);
-
+      await saveDailyInventoryFromPdf(parsed, user?.email || '');
       setSuccess(`Inventario del ${parsed.dateLabel} cargado correctamente.`);
     } catch (err) {
       console.error(err);
@@ -200,9 +310,27 @@ export default function InventoryDayPage() {
     }
   };
 
+  const handleStartCount = async () => {
+    if (!todayInventory?.id) return;
+
+    try {
+      setStartingCount(true);
+      setError('');
+      setSuccess('');
+      setSaveNotice('');
+
+      await startInventoryCount(todayInventory.id);
+      navigate(`/inventario/${todayInventory.id}/editar`);
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || 'No se pudo iniciar el conteo.');
+    } finally {
+      setStartingCount(false);
+    }
+  };
+
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      {/* Input oculto */}
       <input
         ref={fileInputRef}
         type="file"
@@ -211,18 +339,16 @@ export default function InventoryDayPage() {
         onChange={handleFileChange}
       />
 
-      {/* Encabezado */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
             <h1 className="text-3xl font-bold text-white sm:text-4xl">
               Inventario Diario
             </h1>
-
             <p className="mt-2 text-sm leading-7 text-zinc-400 sm:text-base">
               Sube el PDF del día y el sistema agregará automáticamente fecha,
-              semana, cedis, categorías y productos. Está pensado para usarse
-              bien desde teléfono y escritorio.
+              semana, cedis, categorías y productos. El conteo real comienza al
+              presionar <span className="text-white font-medium">Iniciar conteo</span>.
             </p>
           </div>
 
@@ -252,7 +378,6 @@ export default function InventoryDayPage() {
         </div>
       </section>
 
-      {/* Mensajes */}
       {error && (
         <section className="rounded-2xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
           {error}
@@ -268,7 +393,15 @@ export default function InventoryDayPage() {
         </section>
       )}
 
-      {/* Tarjetas rápidas */}
+      {saveNotice && (
+        <section className="rounded-2xl border border-blue-900/60 bg-blue-950/40 px-4 py-3 text-sm text-blue-200">
+          <div className="flex items-start gap-2">
+            <Bell size={18} className="mt-0.5 shrink-0" />
+            <span>{saveNotice}</span>
+          </div>
+        </section>
+      )}
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
           <div className="flex items-start gap-3">
@@ -294,11 +427,7 @@ export default function InventoryDayPage() {
             <div className="min-w-0">
               <p className="text-sm text-zinc-400">Inventario de hoy</p>
               <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
-                {loadingToday
-                  ? 'Cargando...'
-                  : todayInventory
-                    ? 'Cargado'
-                    : 'Pendiente'}
+                {loadingToday ? 'Cargando...' : getInventoryStatusLabel(todayInventory)}
               </h2>
             </div>
           </div>
@@ -335,7 +464,6 @@ export default function InventoryDayPage() {
         </div>
       </section>
 
-      {/* Inventario activo */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -343,27 +471,56 @@ export default function InventoryDayPage() {
               Inventario activo del día
             </h2>
             <p className="mt-1 text-sm text-zinc-400">
-              Si subes otro PDF con la misma fecha, este inventario se
-              actualizará en lugar de duplicarse.
+              Mientras siga en borrador, los conteos pueden reflejarse en tiempo real entre usuarios.
+              Solo al guardar final aparecerá en historial y se podrá descargar.
             </p>
           </div>
 
-          {todayInventory?.id && (
+          {hasInventory && (
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Link
-                to={`/inventario/${todayInventory.id}`}
-                className="inline-flex min-h-[46px] items-center justify-center rounded-2xl border border-zinc-700 bg-black px-4 py-3 font-medium text-white transition hover:border-zinc-500"
-              >
-                {hasCountedItems ? 'Abrir detalle' : 'Iniciar conteo'}
-              </Link>
+              {!isCountStarted && (
+                <button
+                  onClick={handleStartCount}
+                  disabled={startingCount}
+                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500 disabled:opacity-60"
+                >
+                  {startingCount ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Play size={18} />
+                  )}
+                  {startingCount ? 'Iniciando...' : 'Iniciar conteo'}
+                </button>
+              )}
 
-              <button
-                onClick={() => exportInventoryToPDF(todayInventory)}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500"
-              >
-                <Download size={18} />
-                Descargar
-              </button>
+              {isCountStarted && isDraft && (
+                <Link
+                  to={`/inventario/${todayInventory.id}/editar`}
+                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500"
+                >
+                  <Pencil size={18} />
+                  Continuar conteo
+                </Link>
+              )}
+
+              {todayInventory?.status === 'GUARDADO' && (
+                <Link
+                  to={`/inventario/${todayInventory.id}`}
+                  className="inline-flex min-h-[46px] items-center justify-center rounded-2xl border border-zinc-700 bg-black px-4 py-3 font-medium text-white transition hover:border-zinc-500"
+                >
+                  Ver detalle
+                </Link>
+              )}
+
+              {canDownload && (
+                <button
+                  onClick={() => exportInventoryToPDF(todayInventory)}
+                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500"
+                >
+                  <Download size={18} />
+                  Descargar
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -378,7 +535,6 @@ export default function InventoryDayPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {/* Resumen */}
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
               <div className="rounded-2xl border border-zinc-800 bg-black p-4">
                 <p className="text-sm text-zinc-400">Fecha</p>
@@ -396,7 +552,7 @@ export default function InventoryDayPage() {
 
               <div className="rounded-2xl border border-zinc-800 bg-black p-4">
                 <p className="text-sm text-zinc-400">Cedis</p>
-                <p className="mt-2 font-semibold text-white">
+                <p className="mt-2 break-words font-semibold text-white">
                   {todayInventory.cedis || 'Sin cedis'}
                 </p>
               </div>
@@ -423,7 +579,6 @@ export default function InventoryDayPage() {
               </div>
             </div>
 
-            {/* Estados */}
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 p-4">
                 <p className="text-sm text-emerald-400">OK</p>
@@ -445,7 +600,6 @@ export default function InventoryDayPage() {
               </div>
             </div>
 
-            {/* Buscador */}
             <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-black px-4 py-3">
               <Search size={18} className="shrink-0 text-zinc-500" />
               <input
@@ -457,116 +611,139 @@ export default function InventoryDayPage() {
               />
             </div>
 
-            {/* Productos */}
             <div className="space-y-3">
               {filteredItems.length === 0 ? (
                 <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
                   No hay productos que coincidan con la búsqueda.
                 </div>
               ) : (
-                filteredItems.slice(0, 80).map((item, index) => (
-                  <div
-                    key={`${item.productName || 'producto'}-${index}`}
-                    className="rounded-2xl border border-zinc-800 bg-black p-4"
-                  >
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="min-w-0">
-                        <p className="break-words font-semibold text-white">
-                          {item.productName || 'Producto sin nombre'}
-                        </p>
+                filteredItems.slice(0, 80).map((item, index) => {
+                  const counted = getCountedQuantity(item);
+                  const expected = safeNumber(item.expectedQuantity);
+                  const difference = counted - expected;
+                  const tags = buildItemTags(item);
 
-                        <p className="mt-1 text-sm text-zinc-400">
-                          {item.categoryName || 'Sin categoría'}
-                        </p>
+                  return (
+                    <div
+                      key={`${item.productName || 'producto'}-${index}`}
+                      className="rounded-2xl border border-zinc-800 bg-black p-4"
+                    >
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <p className="break-words font-semibold text-white">
+                            {item.productName || 'Producto sin nombre'}
+                          </p>
 
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {item.supplierName || 'Sin proveedor'}
-                        </p>
-                      </div>
+                          <p className="mt-1 text-sm text-zinc-400">
+                            {item.categoryName || 'Sin categoría'}
+                          </p>
 
-                      <span
-                        className={`inline-flex w-fit items-center rounded-xl border px-3 py-1 text-sm font-medium ${getStatusClasses(
-                          item.status
-                        )}`}
-                      >
-                        {item.status || 'SIN ESTADO'}
-                      </span>
-                    </div>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {item.supplierName || 'Sin proveedor'}
+                          </p>
 
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                        <span className="block text-xs text-zinc-500">
-                          Cantidad esperada
-                        </span>
-                        <span className="text-zinc-200">
-                          {Number(item.expectedQuantity || 0).toLocaleString(
-                            'es-MX'
+                          {tags.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {tags.map((tag, tagIndex) => (
+                                <span
+                                  key={`${item.productName}-${tag.label}-${tagIndex}`}
+                                  className={`inline-flex items-center rounded-xl border px-3 py-1 text-xs font-medium ${getTagClasses(
+                                    tag.label
+                                  )}`}
+                                >
+                                  {tag.label} · {safeNumber(tag.quantity).toLocaleString('es-MX')}
+                                </span>
+                              ))}
+                            </div>
                           )}
+                        </div>
+
+                        <span
+                          className={`inline-flex w-fit items-center rounded-xl border px-3 py-1 text-sm font-medium ${
+                            item.status === 'OK'
+                              ? 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400'
+                              : item.status === 'ALERTA'
+                                ? 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400'
+                                : item.status === 'CADUCADO'
+                                  ? 'border-orange-900/60 bg-orange-950/50 text-orange-400'
+                                  : item.status === 'DAÑADO'
+                                    ? 'border-zinc-700 bg-zinc-900 text-zinc-300'
+                                    : 'border-red-900/60 bg-red-950/50 text-red-400'
+                          }`}
+                        >
+                          {item.status || 'SIN ESTADO'}
                         </span>
                       </div>
 
-                      <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                        <span className="block text-xs text-zinc-500">
-                          No disponible
-                        </span>
-                        <span className="text-zinc-200">
-                          {Number(item.unavailableQuantity || 0).toLocaleString(
-                            'es-MX'
-                          )}
-                        </span>
-                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <span className="block text-xs text-zinc-500">
+                            Stock esperado
+                          </span>
+                          <span className="text-zinc-200">
+                            {expected.toLocaleString('es-MX')}
+                          </span>
+                        </div>
 
-                      <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                        <span className="block text-xs text-zinc-500">
-                          Conteo físico
-                        </span>
-                        <span className="text-zinc-200">
-                          {item.countedQuantity != null &&
-                          String(item.countedQuantity).trim() !== ''
-                            ? item.countedQuantity
-                            : 'Pendiente'}
-                        </span>
-                      </div>
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <span className="block text-xs text-zinc-500">
+                            No disponible
+                          </span>
+                          <span className="text-zinc-200">
+                            {safeNumber(item.unavailableQuantity).toLocaleString('es-MX')}
+                          </span>
+                        </div>
 
-                      <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                        <span className="block text-xs text-zinc-500">
-                          Observación
-                        </span>
-                        <span className="break-words text-zinc-200">
-                          {item.observation || '—'}
-                        </span>
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <span className="block text-xs text-zinc-500">
+                            Conteo físico
+                          </span>
+                          <span className="text-zinc-200">
+                            {counted.toLocaleString('es-MX')}
+                          </span>
+                        </div>
+
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <span className="block text-xs text-zinc-500">
+                            Sobra
+                          </span>
+                          <span className="text-emerald-300">
+                            {difference > 0 ? difference.toLocaleString('es-MX') : '0'}
+                          </span>
+                        </div>
+
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <span className="block text-xs text-zinc-500">
+                            Falta
+                          </span>
+                          <span className="text-red-300">
+                            {difference < 0 ? Math.abs(difference).toLocaleString('es-MX') : '0'}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
             {filteredItems.length > 80 && (
               <p className="text-sm text-zinc-500">
-                Se muestran los primeros 80 resultados. Usa la búsqueda para
-                filtrar más.
+                Se muestran los primeros 80 resultados. Usa la búsqueda para filtrar más.
               </p>
             )}
           </div>
         )}
       </section>
 
-      {/* Historial */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
-        <div className="mb-4 flex items-start gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-zinc-300">
-            <History size={22} />
-          </div>
-
-          <div>
-            <h2 className="text-2xl font-bold text-white">
-              Historial de inventarios
-            </h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Inventarios guardados por fecha.
-            </p>
-          </div>
+        <div className="mb-4">
+          <h2 className="text-2xl font-bold text-white">
+            Historial de inventarios
+          </h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Aquí solo aparecen inventarios ya guardados de forma final.
+          </p>
         </div>
 
         <div className="space-y-3">
@@ -576,81 +753,65 @@ export default function InventoryDayPage() {
             </div>
           ) : allInventories.length === 0 ? (
             <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
-              No hay inventarios registrados todavía.
+              No hay inventarios guardados todavía.
             </div>
           ) : (
-            allInventories.slice(0, 20).map((inv) => {
-              const isToday = inv.dateKey === todayDateKey;
+            allInventories.slice(0, 20).map((inv) => (
+              <div
+                key={inv.id}
+                className="rounded-2xl border border-zinc-800 bg-black p-4"
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-white">
+                      {inv.date || 'Sin fecha'}
+                    </p>
 
-              const hasCounted = (inv.items || []).some(
-                (item) =>
-                  item.countedQuantity != null &&
-                  String(item.countedQuantity).trim() !== ''
-              );
+                    <p className="mt-1 text-sm text-zinc-400">
+                      Semana {inv.week || '—'} · {inv.cedis || 'Sin cedis'}
+                    </p>
 
-              return (
-                <div
-                  key={inv.id}
-                  className="rounded-2xl border border-zinc-800 bg-black p-4"
-                >
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="min-w-0">
-                      <p className="font-semibold text-white">
-                        {inv.date || 'Sin fecha'}
-                      </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {inv.items?.length || 0} productos
+                    </p>
+                  </div>
 
-                      <p className="mt-1 text-sm text-zinc-400">
-                        Semana {inv.week || '—'} · {inv.cedis || 'Sin cedis'}
-                      </p>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Link
+                      to={`/inventario/${inv.id}`}
+                      className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-2 font-medium text-white transition hover:border-zinc-500"
+                    >
+                      Ver detalle
+                    </Link>
 
-                      <p className="mt-1 text-xs text-zinc-500">
-                        {inv.items?.length || 0} productos
-                      </p>
-                    </div>
+                    <Link
+                      to={`/inventario/${inv.id}/editar`}
+                      className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-blue-700 bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-500"
+                    >
+                      Editar
+                    </Link>
 
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <Link
-                        to={`/inventario/${inv.id}`}
-                        className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-2 font-medium text-white transition hover:border-zinc-500"
-                      >
-                        {hasCounted ? 'Ver detalle' : 'Iniciar conteo'}
-                      </Link>
-
-                      {isToday && (
-                        <Link
-                          to={`/inventario/${inv.id}/editar`}
-                          className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-blue-700 bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-500"
-                        >
-                          Editar
-                        </Link>
-                      )}
-
-                      <button
-                        onClick={() => exportInventoryToPDF(inv)}
-                        className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-2 font-medium text-white transition hover:bg-emerald-500"
-                      >
-                        <Download size={16} />
-                        Descargar
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => exportInventoryToPDF(inv)}
+                      className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-2 font-medium text-white transition hover:bg-emerald-500"
+                    >
+                      <Download size={16} />
+                      Descargar
+                    </button>
                   </div>
                 </div>
-              );
-            })
+              </div>
+            ))
           )}
         </div>
       </section>
 
-      {/* Aviso */}
       <section className="rounded-3xl border border-yellow-900/60 bg-yellow-950/20 p-5">
         <div className="flex gap-3">
-          <AlertTriangle
-            className="mt-0.5 shrink-0 text-yellow-400"
-            size={20}
-          />
+          <AlertTriangle className="mt-0.5 shrink-0 text-yellow-400" size={20} />
           <div className="text-sm leading-7 text-yellow-100">
-            Si subes un PDF del mismo día, el sistema actualizará ese inventario
-            en vez de duplicarlo.
+            Mientras el inventario esté en borrador, los usuarios pueden seguir contando y ver cambios en tiempo real.
+            Solo al guardar final pasará al historial y quedará listo para descargar.
           </div>
         </div>
       </section>

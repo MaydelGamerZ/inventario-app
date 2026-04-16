@@ -1,44 +1,54 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft,
-  Save,
-  Search,
-  AlertTriangle,
-  ClipboardList,
-  Plus,
-  Trash2,
-  ChevronDown,
-  ChevronUp,
-  Loader2,
-  Pencil,
-  Package,
   CalendarDays,
-  Warehouse,
-  ShieldCheck,
+  FileUp,
+  Search,
+  ClipboardList,
+  AlertTriangle,
+  Package,
+  Boxes,
+  Download,
+  Loader2,
+  CheckCircle2,
+  FolderOpen,
+  Bell,
+  Play,
+  Pencil,
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { parseInventoryPdf } from '../services/pdfInventoryParser';
 import {
-  subscribeInventoryById,
-  saveInventoryDetail,
+  saveDailyInventoryFromPdf,
+  subscribeInventoryByDate,
+  subscribeAllInventories,
+  startInventoryCount,
 } from '../services/inventory';
+import { exportInventoryToPDF } from '../services/pdfExporter';
 
-const OBSERVATION_OPTIONS = [
-  'Buen estado',
-  'Dañado',
-  'Caducado',
-  'Exhibición',
-  'Maltratado',
-  'Otro',
-];
+function getTodayDateKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
-function formatNow() {
-  return new Date().toLocaleString('es-MX', {
+function formatDateLabelFromKey(dateKey) {
+  if (!dateKey) return 'Sin fecha';
+
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const date = new Date(
+    year || new Date().getFullYear(),
+    (month || 1) - 1,
+    day || 1
+  );
+
+  return new Intl.DateTimeFormat('es-MX', {
+    day: 'numeric',
+    month: 'long',
     year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  }).format(date);
 }
 
 function safeNumber(value) {
@@ -46,482 +56,368 @@ function safeNumber(value) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-function sumCountEntries(entries = []) {
-  return entries.reduce((sum, entry) => sum + safeNumber(entry.quantity), 0);
-}
-
-function summarizeEntriesByObservation(entries = []) {
+function summarizeEntries(entries = []) {
   const summary = {};
-  for (const entry of entries) {
-    const obs =
-      String(entry.observationType || 'Buen estado').trim() || 'Buen estado';
-    summary[obs] = (summary[obs] || 0) + safeNumber(entry.quantity);
+
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const label =
+      String(entry?.observationType || 'Buen estado').trim() || 'Buen estado';
+    summary[label] = (summary[label] || 0) + safeNumber(entry?.quantity);
   }
+
   return summary;
 }
 
-function calculateDifference(expected, counted) {
-  return safeNumber(counted) - safeNumber(expected);
-}
-
-function calculateStatus(item) {
-  const obsSummary = summarizeEntriesByObservation(item.countEntries || []);
-  const counted = safeNumber(item.countedQuantity);
-  const expected = safeNumber(item.expectedQuantity);
-  const unavailable = safeNumber(item.unavailableQuantity);
-
-  if (counted <= 0) return 'FALTANTE';
-  if ((obsSummary.Caducado || 0) > 0) return 'CADUCADO';
-  if ((obsSummary.Dañado || 0) > 0 || (obsSummary.Maltratado || 0) > 0) {
-    return 'DAÑADO';
+function getCountedQuantity(item) {
+  const entries = Array.isArray(item?.countEntries) ? item.countEntries : [];
+  if (entries.length > 0) {
+    return entries.reduce((sum, entry) => sum + safeNumber(entry?.quantity), 0);
   }
-  if (unavailable > 0 || (obsSummary.Exhibición || 0) > 0) return 'ALERTA';
-  if (expected <= 0) return 'FALTANTE';
-  return 'OK';
+
+  return safeNumber(item?.countedQuantity);
 }
 
-function normalizeItem(item, index = 0) {
-  const countEntries = Array.isArray(item.countEntries) ? item.countEntries : [];
-  const countedQuantity = sumCountEntries(countEntries);
-  const difference = calculateDifference(item.expectedQuantity, countedQuantity);
-  const observationTotals = summarizeEntriesByObservation(countEntries);
+function buildItemTags(item) {
+  const tags = [];
+  const observationTotals = summarizeEntries(item?.countEntries || []);
+  const expected = safeNumber(item?.expectedQuantity);
+  const counted = getCountedQuantity(item);
+  const difference = counted - expected;
 
-  const normalized = {
-    ...item,
-    _localKey:
-      item._localKey ||
-      item.id ||
-      `${item.productName || 'producto'}-${item.categoryCode || 'cat'}-${item.supplierCode || 'sup'}-${index}`,
-    expectedQuantity: safeNumber(item.expectedQuantity),
-    unavailableQuantity: safeNumber(item.unavailableQuantity),
-    countedQuantity,
-    total: countedQuantity,
-    difference,
-    observation: item.observation || '',
-    countEntries,
-    observationTotals,
-  };
+  Object.entries(observationTotals).forEach(([label, quantity]) => {
+    if (safeNumber(quantity) > 0) {
+      tags.push({
+        label,
+        quantity: safeNumber(quantity),
+      });
+    }
+  });
 
-  normalized.status = calculateStatus(normalized);
-  return normalized;
-}
-
-function getStatusColor(status) {
-  switch (status) {
-    case 'OK':
-      return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
-    case 'ALERTA':
-      return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
-    case 'FALTANTE':
-      return 'border-red-900/60 bg-red-950/50 text-red-400';
-    case 'DAÑADO':
-      return 'border-zinc-700 bg-zinc-900 text-zinc-300';
-    case 'CADUCADO':
-      return 'border-orange-900/60 bg-orange-950/50 text-orange-400';
-    default:
-      return 'border-zinc-800 bg-zinc-900 text-zinc-300';
+  if (counted <= 0) {
+    tags.push({
+      label: 'Faltante',
+      quantity: expected > 0 ? expected : 0,
+    });
   }
+
+  if (difference > 0) {
+    tags.push({
+      label: 'Sobrante',
+      quantity: difference,
+    });
+  }
+
+  if (difference < 0 && counted > 0) {
+    tags.push({
+      label: 'Faltante',
+      quantity: Math.abs(difference),
+    });
+  }
+
+  return tags;
 }
 
-function getObservationBadgeColor(label) {
-  switch (label) {
-    case 'Buen estado':
+function getTagClasses(label) {
+  switch (String(label).toLowerCase()) {
+    case 'buen estado':
       return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
-    case 'Dañado':
-      return 'border-zinc-700 bg-zinc-900 text-zinc-300';
-    case 'Caducado':
+    case 'caducado':
       return 'border-orange-900/60 bg-orange-950/50 text-orange-400';
-    case 'Exhibición':
+    case 'dañado':
+    case 'maltratado':
+      return 'border-zinc-700 bg-zinc-900 text-zinc-300';
+    case 'exhibición':
+    case 'exhibicion':
       return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
-    case 'Maltratado':
+    case 'faltante':
       return 'border-red-900/60 bg-red-950/50 text-red-400';
-    case 'Otro':
+    case 'sobrante':
       return 'border-blue-900/60 bg-blue-950/50 text-blue-400';
-    case 'No disponible':
-      return 'border-zinc-700 bg-zinc-950 text-zinc-300';
-    case 'OK':
-      return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
-    case 'ALERTA':
-      return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
-    case 'FALTANTE':
-      return 'border-red-900/60 bg-red-950/50 text-red-400';
-    case 'DAÑADO':
-      return 'border-zinc-700 bg-zinc-900 text-zinc-300';
-    case 'CADUCADO':
-      return 'border-orange-900/60 bg-orange-950/50 text-orange-400';
     default:
       return 'border-zinc-800 bg-zinc-900 text-zinc-300';
   }
 }
 
-function getTodayDateKey() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+function getInventoryStatusLabel(inventory) {
+  if (!inventory) return 'Pendiente';
+
+  if (inventory.status === 'GUARDADO') {
+    return 'Guardado';
+  }
+
+  if (inventory.countingStarted) {
+    return 'Conteo en proceso';
+  }
+
+  return 'Cargado';
 }
 
-export default function InventoryDetailPage() {
-  const { id } = useParams();
-  const location = useLocation();
+export default function InventoryDayPage() {
+  const { user } = useAuth();
   const navigate = useNavigate();
+  const fileInputRef = useRef(null);
+  const previousStatusRef = useRef('');
 
-  const [inventory, setInventory] = useState(null);
-  const [items, setItems] = useState([]);
-  const [notes, setNotes] = useState('');
-  const [search, setSearch] = useState('');
-  const [expandedItems, setExpandedItems] = useState({});
-  const [entryDrafts, setEntryDrafts] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const todayDateKey = useMemo(() => getTodayDateKey(), []);
+  const todayLabel = useMemo(
+    () => formatDateLabelFromKey(todayDateKey),
+    [todayDateKey]
+  );
+
+  const [todayInventory, setTodayInventory] = useState(null);
+  const [allInventories, setAllInventories] = useState([]);
+  const [loadingToday, setLoadingToday] = useState(true);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [startingCount, setStartingCount] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-
-  const isEditRoute = location.pathname.endsWith('/editar');
-  const todayDateKey = useMemo(() => getTodayDateKey(), []);
+  const [search, setSearch] = useState('');
+  const [saveNotice, setSaveNotice] = useState('');
 
   useEffect(() => {
-    setLoading(true);
+    setLoadingToday(true);
+    setLoadingHistory(true);
 
-    const unsubscribe = subscribeInventoryById(id, (data) => {
-      if (!data) {
-        setInventory(null);
-        setItems([]);
-        setNotes('');
-        setLoading(false);
-        return;
-      }
-
-      const normalizedItems = Array.isArray(data.items)
-        ? data.items.map((item, index) => normalizeItem(item, index))
-        : [];
-
-      setInventory(data);
-      setItems(normalizedItems);
-      setNotes(data.notes || '');
-
-      setExpandedItems((prev) => {
-        const next = { ...prev };
-
-        normalizedItems.forEach((item, idx) => {
-          if (typeof next[item._localKey] !== 'boolean') {
-            next[item._localKey] = idx === 0;
-          }
-        });
-
-        return next;
-      });
-
-      setLoading(false);
+    const unsubscribeToday = subscribeInventoryByDate(todayDateKey, (inv) => {
+      setTodayInventory(inv || null);
+      setLoadingToday(false);
     });
 
-    return () => unsubscribe?.();
-  }, [id]);
+    const unsubscribeAll = subscribeAllInventories((list) => {
+      setAllInventories(Array.isArray(list) ? list : []);
+      setLoadingHistory(false);
+    });
 
-  const canEdit = useMemo(() => {
-    return isEditRoute && inventory?.dateKey === todayDateKey;
-  }, [isEditRoute, inventory, todayDateKey]);
+    return () => {
+      unsubscribeToday?.();
+      unsubscribeAll?.();
+    };
+  }, [todayDateKey]);
 
-  const showEditButton = useMemo(() => {
-    return !isEditRoute && inventory?.dateKey === todayDateKey;
-  }, [isEditRoute, inventory, todayDateKey]);
+  useEffect(() => {
+    if (!todayInventory) {
+      previousStatusRef.current = '';
+      return;
+    }
+
+    const currentStatus = todayInventory.status || '';
+    const previousStatus = previousStatusRef.current;
+
+    if (
+      previousStatus &&
+      previousStatus !== 'GUARDADO' &&
+      currentStatus === 'GUARDADO'
+    ) {
+      const whoSaved =
+        todayInventory.finalizedByEmail ||
+        todayInventory.savedByEmail ||
+        'Otro usuario';
+
+      setSaveNotice(`${whoSaved} guardó el conteo final.`);
+    }
+
+    previousStatusRef.current = currentStatus;
+  }, [todayInventory]);
 
   const filteredItems = useMemo(() => {
+    const items = todayInventory?.items || [];
     const term = search.trim().toLowerCase();
+
     if (!term) return items;
 
     return items.filter((item) => {
+      const observationLabels = Object.keys(
+        summarizeEntries(item?.countEntries || [])
+      )
+        .join(' ')
+        .toLowerCase();
+
       return (
         item.productName?.toLowerCase().includes(term) ||
         item.categoryName?.toLowerCase().includes(term) ||
         item.supplierName?.toLowerCase().includes(term) ||
-        item.status?.toLowerCase().includes(term) ||
-        item.observation?.toLowerCase().includes(term)
+        observationLabels.includes(term) ||
+        item.status?.toLowerCase().includes(term)
       );
     });
-  }, [items, search]);
+  }, [todayInventory, search]);
 
-  const summary = useMemo(() => {
+  const stats = useMemo(() => {
+    const items = todayInventory?.items || [];
+
     return {
-      total: items.length,
-      ok: items.filter((it) => it.status === 'OK').length,
-      alerta: items.filter((it) => it.status === 'ALERTA').length,
-      faltante: items.filter((it) => it.status === 'FALTANTE').length,
-      danado: items.filter((it) => it.status === 'DAÑADO').length,
-      caducado: items.filter((it) => it.status === 'CADUCADO').length,
-    };
-  }, [items]);
-
-  const updateItem = (localKey, updater) => {
-    setItems((prev) =>
-      prev.map((item) => {
-        if (item._localKey !== localKey) return item;
-
-        const updated =
-          typeof updater === 'function'
-            ? updater(item)
-            : { ...item, ...updater };
-
-        return normalizeItem(updated);
-      })
-    );
-  };
-
-  const handleDraftChange = (localKey, field, value) => {
-    setEntryDrafts((prev) => ({
-      ...prev,
-      [localKey]: {
-        quantity: prev[localKey]?.quantity || '',
-        comment: prev[localKey]?.comment || '',
-        observationType: prev[localKey]?.observationType || 'Buen estado',
-        [field]: value,
-      },
-    }));
-  };
-
-  const handleAddCountEntry = (localKey) => {
-    const draft = entryDrafts[localKey] || {
-      quantity: '',
-      comment: '',
-      observationType: 'Buen estado',
-    };
-
-    const qty = safeNumber(draft.quantity);
-    const observationType = String(
-      draft.observationType || 'Buen estado'
-    ).trim();
-
-    if (qty <= 0) {
-      setError('La cantidad del conteo debe ser mayor a cero.');
-      setSuccess('');
-      return;
-    }
-
-    if (!OBSERVATION_OPTIONS.includes(observationType)) {
-      setError('La observación seleccionada no es válida.');
-      setSuccess('');
-      return;
-    }
-
-    setError('');
-    setSuccess('');
-
-    updateItem(localKey, (item) => ({
-      ...item,
-      countEntries: [
-        ...(item.countEntries || []),
-        {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          quantity: qty,
-          comment: String(draft.comment || '').trim(),
-          observationType,
-          createdAt: formatNow(),
-        },
-      ],
-    }));
-
-    setEntryDrafts((prev) => ({
-      ...prev,
-      [localKey]: {
-        quantity: '',
-        comment: '',
-        observationType: 'Buen estado',
-      },
-    }));
-  };
-
-  const handleDeleteCountEntry = (localKey, entryId) => {
-    setError('');
-    setSuccess('');
-
-    updateItem(localKey, (item) => ({
-      ...item,
-      countEntries: (item.countEntries || []).filter(
-        (entry) => entry.id !== entryId
+      totalProducts: items.length,
+      totalCategories: todayInventory?.categories?.length || 0,
+      ok: items.filter((i) => i.status === 'OK').length,
+      alerta: items.filter((i) => i.status === 'ALERTA').length,
+      faltante: items.filter((i) => i.status === 'FALTANTE').length,
+      totalStockEsperado: items.reduce(
+        (sum, item) => sum + safeNumber(item.expectedQuantity),
+        0
       ),
-    }));
+      totalNoDisponible: items.reduce(
+        (sum, item) => sum + safeNumber(item.unavailableQuantity),
+        0
+      ),
+    };
+  }, [todayInventory]);
+
+  const canDownload = todayInventory?.status === 'GUARDADO';
+  const isDraft = todayInventory?.status === 'BORRADOR';
+  const hasInventory = !!todayInventory;
+  const isCountStarted = Boolean(todayInventory?.countingStarted);
+
+  const openFilePicker = () => {
+    fileInputRef.current?.click();
   };
 
-  const handleSave = async () => {
-    if (!inventory?.id || saving) return;
+  const handleFileChange = async (event) => {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) return;
+
+    setError('');
+    setSuccess('');
+    setSaveNotice('');
+
+    if (selectedFile.type !== 'application/pdf') {
+      setError('El archivo seleccionado no es un PDF válido.');
+      event.target.value = '';
+      return;
+    }
+
+    setUploading(true);
 
     try {
-      setSaving(true);
-      setError('');
-      setSuccess('');
+      const parsed = await parseInventoryPdf(selectedFile);
 
-      const normalizedItems = items.map((it, index) => normalizeItem(it, index));
+      if (!parsed) {
+        throw new Error('No se pudo leer el contenido del PDF.');
+      }
 
-      await saveInventoryDetail(inventory.id, normalizedItems, notes);
+      if (parsed.dateKey !== todayDateKey) {
+        setError(
+          `La fecha del PDF (${parsed.dateLabel || 'desconocida'}) no coincide con la fecha actual (${todayLabel}).`
+        );
+        return;
+      }
 
-      setInventory((prev) => ({
-        ...prev,
-        items: normalizedItems,
-        notes,
-      }));
-      setItems(normalizedItems);
-      setSuccess('Inventario actualizado correctamente.');
+      await saveDailyInventoryFromPdf(parsed, user?.email || '');
+      setSuccess(`Inventario del ${parsed.dateLabel} cargado correctamente.`);
     } catch (err) {
       console.error(err);
-      setError(err?.message || 'No se pudo guardar el inventario.');
+      setError(err?.message || 'No se pudo procesar el PDF.');
     } finally {
-      setSaving(false);
+      setUploading(false);
+      event.target.value = '';
     }
   };
 
-  if (loading) {
-    return (
-      <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6 text-zinc-300">
-        <div className="flex items-center gap-3">
-          <Loader2 size={18} className="animate-spin" />
-          Cargando inventario...
-        </div>
-      </div>
-    );
-  }
+  const handleStartCount = async () => {
+    if (!todayInventory?.id) return;
 
-  if (!inventory) {
-    return (
-      <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6">
-          <h1 className="text-2xl font-bold text-white">
-            Inventario no encontrado
-          </h1>
-          <p className="mt-2 text-zinc-400">
-            No existe un inventario con ese identificador.
-          </p>
+    try {
+      setStartingCount(true);
+      setError('');
+      setSuccess('');
+      setSaveNotice('');
 
-          <div className="mt-5">
-            <Link
-              to="/inventario-diario"
-              className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-500"
-            >
-              <ArrowLeft size={18} />
-              Volver
-            </Link>
-          </div>
-        </section>
-      </div>
-    );
-  }
+      await startInventoryCount(todayInventory.id);
+      navigate(`/inventario/${todayInventory.id}/editar`);
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || 'No se pudo iniciar el conteo.');
+    } finally {
+      setStartingCount(false);
+    }
+  };
 
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      {/* Encabezado */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
-            <div className="mb-3 flex items-center gap-3">
-              <button
-                onClick={() => navigate('/inventario-diario')}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-zinc-800 bg-black text-zinc-200 transition hover:border-zinc-700"
-                aria-label="Volver"
-              >
-                <ArrowLeft size={18} />
-              </button>
-
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-blue-400">
-                  {canEdit ? 'Editar inventario' : 'Detalle de inventario'}
-                </p>
-                <h1 className="text-2xl font-bold text-white sm:text-3xl">
-                  Conteo del inventario
-                </h1>
-              </div>
-            </div>
-
-            <p className="text-sm leading-7 text-zinc-400">
-              {canEdit
-                ? 'Puedes modificar los conteos y observaciones del inventario de hoy.'
-                : showEditButton
-                  ? 'Este inventario corresponde al día de hoy. Puedes entrar a editarlo.'
-                  : 'Los inventarios de días anteriores se muestran solo en modo lectura.'}
+            <h1 className="text-3xl font-bold text-white sm:text-4xl">
+              Inventario Diario
+            </h1>
+            <p className="mt-2 text-sm leading-7 text-zinc-400 sm:text-base">
+              Sube el PDF del día y el sistema agregará automáticamente fecha,
+              semana, cedis, categorías y productos. El conteo real comienza al
+              presionar{' '}
+              <span className="text-white font-medium">Iniciar conteo</span>.
             </p>
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row">
-            {canEdit && (
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {saving ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <Save size={18} />
-                )}
-                {saving ? 'Guardando...' : 'Guardar inventario'}
-              </button>
-            )}
+            <button
+              onClick={openFilePicker}
+              disabled={uploading}
+              className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {uploading ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <FileUp size={18} />
+              )}
+              {uploading ? 'Procesando PDF...' : 'Subir PDF del día'}
+            </button>
 
-            {showEditButton && (
-              <Link
-                to={`/inventario/${inventory.id}/editar`}
-                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500"
-              >
-                <Pencil size={18} />
-                Editar
-              </Link>
-            )}
+            <button
+              onClick={openFilePicker}
+              disabled={uploading}
+              className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-5 py-3 font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FolderOpen size={18} />
+              Elegir archivo
+            </button>
           </div>
         </div>
       </section>
 
-      {/* Mensajes */}
       {error && (
-        <div className="rounded-2xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+        <section className="rounded-2xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
           {error}
-        </div>
+        </section>
       )}
 
       {success && (
-        <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
-          {success}
-        </div>
+        <section className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
+          <div className="flex items-start gap-2">
+            <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
+            <span>{success}</span>
+          </div>
+        </section>
       )}
 
-      {/* Info general */}
+      {saveNotice && (
+        <section className="rounded-2xl border border-blue-900/60 bg-blue-950/40 px-4 py-3 text-sm text-blue-200">
+          <div className="flex items-start gap-2">
+            <Bell size={18} className="mt-0.5 shrink-0" />
+            <span>{saveNotice}</span>
+          </div>
+        </section>
+      )}
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
           <div className="flex items-start gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-blue-400">
               <CalendarDays size={22} />
             </div>
-            <div className="min-w-0">
-              <p className="text-sm text-zinc-400">Fecha</p>
-              <p className="mt-2 text-lg font-semibold text-white sm:text-xl">
-                {inventory.date || 'Sin fecha'}
-              </p>
-            </div>
-          </div>
-        </div>
 
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-zinc-300">
-              <ClipboardList size={22} />
-            </div>
             <div className="min-w-0">
-              <p className="text-sm text-zinc-400">Semana</p>
-              <p className="mt-2 text-lg font-semibold text-white sm:text-xl">
-                {inventory.week || 'Sin semana'}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-yellow-400">
-              <Warehouse size={22} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm text-zinc-400">Cedis</p>
-              <p className="mt-2 text-lg font-semibold text-white sm:text-xl">
-                {inventory.cedis || 'Sin cedis'}
-              </p>
+              <p className="text-sm text-zinc-400">Hoy</p>
+              <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
+                {todayLabel}
+              </h2>
             </div>
           </div>
         </div>
@@ -529,191 +425,273 @@ export default function InventoryDetailPage() {
         <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
           <div className="flex items-start gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-emerald-400">
-              <ShieldCheck size={22} />
+              <ClipboardList size={22} />
             </div>
+
             <div className="min-w-0">
-              <p className="text-sm text-zinc-400">Estado</p>
-              <p className="mt-2 text-lg font-semibold text-emerald-400 sm:text-xl">
-                {inventory.status || 'Abierto'}
-              </p>
+              <p className="text-sm text-zinc-400">Inventario de hoy</p>
+              <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
+                {loadingToday
+                  ? 'Cargando...'
+                  : getInventoryStatusLabel(todayInventory)}
+              </h2>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-yellow-400">
+              <Boxes size={22} />
+            </div>
+
+            <div className="min-w-0">
+              <p className="text-sm text-zinc-400">Categorías</p>
+              <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
+                {stats.totalCategories}
+              </h2>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-zinc-300">
+              <Package size={22} />
+            </div>
+
+            <div className="min-w-0">
+              <p className="text-sm text-zinc-400">Usuario actual</p>
+              <h2 className="mt-2 break-all text-base font-bold text-white sm:text-lg">
+                {user?.email || 'Sin usuario'}
+              </h2>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Resumen */}
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-          <p className="text-sm text-zinc-400">Total</p>
-          <p className="mt-1 text-2xl font-semibold text-white">
-            {summary.total}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 p-4">
-          <p className="text-sm text-emerald-400">OK</p>
-          <p className="mt-1 text-2xl font-semibold text-white">{summary.ok}</p>
-        </div>
-
-        <div className="rounded-2xl border border-yellow-900/60 bg-yellow-950/40 p-4">
-          <p className="text-sm text-yellow-400">Alerta</p>
-          <p className="mt-1 text-2xl font-semibold text-white">
-            {summary.alerta}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-red-900/60 bg-red-950/40 p-4">
-          <p className="text-sm text-red-400">Faltantes</p>
-          <p className="mt-1 text-2xl font-semibold text-white">
-            {summary.faltante}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
-          <p className="text-sm text-zinc-300">Dañados</p>
-          <p className="mt-1 text-2xl font-semibold text-white">
-            {summary.danado}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-orange-900/60 bg-orange-950/40 p-4">
-          <p className="text-sm text-orange-400">Caducados</p>
-          <p className="mt-1 text-2xl font-semibold text-white">
-            {summary.caducado}
-          </p>
-        </div>
-      </section>
-
-      {/* Productos */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
-        <div className="mb-4 flex items-center gap-3">
-          <ClipboardList size={20} className="text-blue-400" />
-          <h2 className="text-2xl font-bold text-white">
-            Productos del inventario
-          </h2>
-        </div>
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-white">
+              Inventario activo del día
+            </h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              Mientras siga en borrador, los conteos pueden reflejarse en tiempo
+              real entre usuarios. Solo al guardar final aparecerá en historial
+              y se podrá descargar.
+            </p>
+          </div>
 
-        <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-black px-4 py-3">
-          <Search size={18} className="shrink-0 text-zinc-500" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar producto, categoría, proveedor, estado u observación..."
-            className="w-full bg-transparent text-white outline-none placeholder:text-zinc-500"
-          />
-        </div>
-
-        <div className="mt-4 space-y-3">
-          {filteredItems.length === 0 ? (
-            <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
-              No hay productos que coincidan con la búsqueda.
-            </div>
-          ) : (
-            filteredItems.map((item) => {
-              const localKey = item._localKey;
-              const draft = entryDrafts[localKey] || {
-                quantity: '',
-                comment: '',
-                observationType: 'Buen estado',
-              };
-              const isExpanded = !!expandedItems[localKey];
-              const observationTotals = item.observationTotals || {};
-
-              const stateTags = [];
-
-              for (const opt of OBSERVATION_OPTIONS) {
-                const qty = safeNumber(observationTotals[opt] || 0);
-                if (qty > 0) {
-                  stateTags.push({ label: opt, quantity: qty });
-                }
-              }
-
-              if (stateTags.length === 0) {
-                if (safeNumber(item.unavailableQuantity) > 0) {
-                  stateTags.push({
-                    label: 'No disponible',
-                    quantity: safeNumber(item.unavailableQuantity),
-                  });
-                } else {
-                  stateTags.push({
-                    label: item.status || 'OK',
-                    quantity: safeNumber(item.countedQuantity || 0),
-                  });
-                }
-              }
-
-              return (
-                <div
-                  key={localKey}
-                  className="overflow-hidden rounded-2xl border border-zinc-800 bg-black"
+          {hasInventory && (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {!isCountStarted && (
+                <button
+                  onClick={handleStartCount}
+                  disabled={startingCount}
+                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500 disabled:opacity-60"
                 >
-                  {/* Cabecera */}
-                  <button
-                    onClick={() =>
-                      setExpandedItems((prev) => ({
-                        ...prev,
-                        [localKey]: !prev[localKey],
-                      }))
-                    }
-                    className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-zinc-950"
-                  >
-                    <div className="min-w-0">
-                      <p className="break-words font-semibold text-white">
-                        {item.productName}
-                      </p>
+                  {startingCount ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Play size={18} />
+                  )}
+                  {startingCount ? 'Iniciando...' : 'Iniciar conteo'}
+                </button>
+              )}
 
-                      <p className="mt-1 text-sm text-zinc-400">
-                        {item.categoryName}
-                      </p>
+              {isCountStarted && isDraft && (
+                <Link
+                  to={`/inventario/${todayInventory.id}/editar`}
+                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500"
+                >
+                  <Pencil size={18} />
+                  Continuar conteo
+                </Link>
+              )}
 
-                      <p className="mt-1 text-xs text-zinc-500">
-                        {item.supplierName}
-                      </p>
+              {todayInventory?.status === 'GUARDADO' && (
+                <Link
+                  to={`/inventario/${todayInventory.id}`}
+                  className="inline-flex min-h-[46px] items-center justify-center rounded-2xl border border-zinc-700 bg-black px-4 py-3 font-medium text-white transition hover:border-zinc-500"
+                >
+                  Ver detalle
+                </Link>
+              )}
 
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {stateTags.map((tag) => (
-                          <span
-                            key={`${localKey}-${tag.label}-${tag.quantity}`}
-                            className={`inline-flex items-center rounded-xl border px-3 py-1 text-xs font-medium ${getObservationBadgeColor(
-                              tag.label
-                            )}`}
-                          >
-                            {tag.label} ·{' '}
-                            {safeNumber(tag.quantity).toLocaleString('es-MX')}
-                          </span>
-                        ))}
+              {canDownload && (
+                <button
+                  onClick={() => exportInventoryToPDF(todayInventory)}
+                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500"
+                >
+                  <Download size={18} />
+                  Descargar
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {loadingToday ? (
+          <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
+            Cargando inventario...
+          </div>
+        ) : !todayInventory ? (
+          <div className="rounded-2xl border border-dashed border-zinc-800 bg-black px-4 py-6 text-zinc-400">
+            Aún no has subido el PDF del inventario de hoy.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+                <p className="text-sm text-zinc-400">Fecha</p>
+                <p className="mt-2 font-semibold text-white">
+                  {todayInventory.date || 'Sin fecha'}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+                <p className="text-sm text-zinc-400">Semana</p>
+                <p className="mt-2 font-semibold text-white">
+                  {todayInventory.week || 'Sin semana'}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+                <p className="text-sm text-zinc-400">Cedis</p>
+                <p className="mt-2 break-words font-semibold text-white">
+                  {todayInventory.cedis || 'Sin cedis'}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+                <p className="text-sm text-zinc-400">Productos</p>
+                <p className="mt-2 font-semibold text-white">
+                  {stats.totalProducts}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+                <p className="text-sm text-zinc-400">Stock esperado</p>
+                <p className="mt-2 font-semibold text-white">
+                  {stats.totalStockEsperado.toLocaleString('es-MX')}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+                <p className="text-sm text-zinc-400">No disponible</p>
+                <p className="mt-2 font-semibold text-white">
+                  {stats.totalNoDisponible.toLocaleString('es-MX')}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 p-4">
+                <p className="text-sm text-emerald-400">OK</p>
+                <p className="mt-2 text-2xl font-bold text-white">{stats.ok}</p>
+              </div>
+
+              <div className="rounded-2xl border border-yellow-900/60 bg-yellow-950/40 p-4">
+                <p className="text-sm text-yellow-400">Alerta</p>
+                <p className="mt-2 text-2xl font-bold text-white">
+                  {stats.alerta}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-red-900/60 bg-red-950/40 p-4">
+                <p className="text-sm text-red-400">Faltantes</p>
+                <p className="mt-2 text-2xl font-bold text-white">
+                  {stats.faltante}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-black px-4 py-3">
+              <Search size={18} className="shrink-0 text-zinc-500" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar producto, categoría, proveedor u observación..."
+                className="w-full bg-transparent text-white outline-none placeholder:text-zinc-500"
+              />
+            </div>
+
+            <div className="space-y-3">
+              {filteredItems.length === 0 ? (
+                <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
+                  No hay productos que coincidan con la búsqueda.
+                </div>
+              ) : (
+                filteredItems.slice(0, 80).map((item, index) => {
+                  const counted = getCountedQuantity(item);
+                  const expected = safeNumber(item.expectedQuantity);
+                  const difference = counted - expected;
+                  const tags = buildItemTags(item);
+
+                  return (
+                    <div
+                      key={`${item.productName || 'producto'}-${index}`}
+                      className="rounded-2xl border border-zinc-800 bg-black p-4"
+                    >
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <p className="break-words font-semibold text-white">
+                            {item.productName || 'Producto sin nombre'}
+                          </p>
+
+                          <p className="mt-1 text-sm text-zinc-400">
+                            {item.categoryName || 'Sin categoría'}
+                          </p>
+
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {item.supplierName || 'Sin proveedor'}
+                          </p>
+
+                          {tags.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {tags.map((tag, tagIndex) => (
+                                <span
+                                  key={`${item.productName}-${tag.label}-${tagIndex}`}
+                                  className={`inline-flex items-center rounded-xl border px-3 py-1 text-xs font-medium ${getTagClasses(
+                                    tag.label
+                                  )}`}
+                                >
+                                  {tag.label} ·{' '}
+                                  {safeNumber(tag.quantity).toLocaleString(
+                                    'es-MX'
+                                  )}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
 
                         <span
-                          className={`inline-flex items-center rounded-xl border px-3 py-1 text-xs font-medium ${getStatusColor(
-                            item.status
-                          )}`}
+                          className={`inline-flex w-fit items-center rounded-xl border px-3 py-1 text-sm font-medium ${
+                            item.status === 'OK'
+                              ? 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400'
+                              : item.status === 'ALERTA'
+                                ? 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400'
+                                : item.status === 'CADUCADO'
+                                  ? 'border-orange-900/60 bg-orange-950/50 text-orange-400'
+                                  : item.status === 'DAÑADO'
+                                    ? 'border-zinc-700 bg-zinc-900 text-zinc-300'
+                                    : 'border-red-900/60 bg-red-950/50 text-red-400'
+                          }`}
                         >
-                          Estado · {item.status}
+                          {item.status || 'SIN ESTADO'}
                         </span>
                       </div>
-                    </div>
 
-                    <div className="shrink-0">
-                      {isExpanded ? (
-                        <ChevronUp size={18} className="text-zinc-400" />
-                      ) : (
-                        <ChevronDown size={18} className="text-zinc-400" />
-                      )}
-                    </div>
-                  </button>
-
-                  {/* Desplegable */}
-                  {isExpanded && (
-                    <div className="border-t border-zinc-800 px-4 py-4">
-                      {/* Resumen producto */}
-                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                         <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
                           <span className="block text-xs text-zinc-500">
                             Stock esperado
                           </span>
                           <span className="text-zinc-200">
-                            {item.expectedQuantity.toLocaleString('es-MX')}
+                            {expected.toLocaleString('es-MX')}
                           </span>
                         </div>
 
@@ -722,215 +700,141 @@ export default function InventoryDetailPage() {
                             No disponible
                           </span>
                           <span className="text-zinc-200">
-                            {item.unavailableQuantity.toLocaleString('es-MX')}
+                            {safeNumber(
+                              item.unavailableQuantity
+                            ).toLocaleString('es-MX')}
                           </span>
                         </div>
 
                         <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
                           <span className="block text-xs text-zinc-500">
-                            Contado acumulado
+                            Conteo físico
                           </span>
                           <span className="text-zinc-200">
-                            {item.countedQuantity.toLocaleString('es-MX')}
+                            {counted.toLocaleString('es-MX')}
                           </span>
                         </div>
 
                         <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
                           <span className="block text-xs text-zinc-500">
-                            Diferencia
+                            Sobra
                           </span>
-                          <span
-                            className={
-                              item.difference < 0
-                                ? 'text-red-300'
-                                : item.difference > 0
-                                  ? 'text-emerald-300'
-                                  : 'text-zinc-200'
-                            }
-                          >
-                            {item.difference.toLocaleString('es-MX')}
+                          <span className="text-emerald-300">
+                            {difference > 0
+                              ? difference.toLocaleString('es-MX')
+                              : '0'}
                           </span>
                         </div>
-                      </div>
 
-                      {/* Agregar conteo */}
-                      {canEdit && (
-                        <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-                          <p className="mb-3 text-sm font-semibold text-white">
-                            Agregar conteo
-                          </p>
-
-                          <div className="grid gap-3 md:grid-cols-[140px_1fr_220px_auto]">
-                            <input
-                              type="number"
-                              inputMode="numeric"
-                              min="1"
-                              value={draft.quantity}
-                              onChange={(e) =>
-                                handleDraftChange(
-                                  localKey,
-                                  'quantity',
-                                  e.target.value
-                                )
-                              }
-                              placeholder="Cantidad"
-                              className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                            />
-
-                            <input
-                              type="text"
-                              value={draft.comment}
-                              onChange={(e) =>
-                                handleDraftChange(
-                                  localKey,
-                                  'comment',
-                                  e.target.value
-                                )
-                              }
-                              placeholder="Comentario"
-                              className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                            />
-
-                            <select
-                              value={draft.observationType}
-                              onChange={(e) =>
-                                handleDraftChange(
-                                  localKey,
-                                  'observationType',
-                                  e.target.value
-                                )
-                              }
-                              className="w-full rounded-xl border border-zinc-800 bg-black px-3 py-3 text-white outline-none transition focus:border-blue-500"
-                            >
-                              {OBSERVATION_OPTIONS.map((opt) => (
-                                <option key={opt} value={opt}>
-                                  {opt}
-                                </option>
-                              ))}
-                            </select>
-
-                            <button
-                              onClick={() => handleAddCountEntry(localKey)}
-                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500"
-                            >
-                              <Plus size={16} />
-                              Agregar
-                            </button>
-                          </div>
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                          <span className="block text-xs text-zinc-500">
+                            Falta
+                          </span>
+                          <span className="text-red-300">
+                            {difference < 0
+                              ? Math.abs(difference).toLocaleString('es-MX')
+                              : '0'}
+                          </span>
                         </div>
-                      )}
-
-                      {/* Resumen observaciones */}
-                      <div className="mt-4">
-                        <p className="mb-2 text-sm font-semibold text-white">
-                          Resumen por observación
-                        </p>
-
-                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                          {OBSERVATION_OPTIONS.filter(
-                            (opt) => (observationTotals[opt] || 0) > 0
-                          ).length === 0 ? (
-                            <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-400">
-                              Aún no hay observaciones registradas.
-                            </div>
-                          ) : (
-                            OBSERVATION_OPTIONS.filter(
-                              (opt) => (observationTotals[opt] || 0) > 0
-                            ).map((opt) => (
-                              <div
-                                key={`${localKey}-${opt}`}
-                                className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3"
-                              >
-                                <span className="block text-xs text-zinc-500">
-                                  {opt}
-                                </span>
-                                <span className="text-zinc-200">
-                                  {(observationTotals[opt] || 0).toLocaleString(
-                                    'es-MX'
-                                  )}
-                                </span>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Historial */}
-                      <div className="mt-4 space-y-2">
-                        <p className="text-sm font-semibold text-white">
-                          Historial de conteos
-                        </p>
-
-                        {!item.countEntries || item.countEntries.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-400">
-                            Aún no hay conteos registrados para este producto.
-                          </div>
-                        ) : (
-                          item.countEntries.map((entry) => (
-                            <div
-                              key={entry.id}
-                              className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 md:flex-row md:items-center md:justify-between"
-                            >
-                              <div className="min-w-0">
-                                <p className="font-medium text-white">
-                                  +{safeNumber(entry.quantity).toLocaleString('es-MX')}
-                                </p>
-
-                                <p className="mt-1 break-words text-sm text-zinc-400">
-                                  {entry.comment || 'Sin comentario'}
-                                </p>
-
-                                <p className="mt-1 text-xs text-zinc-500">
-                                  {entry.observationType || 'Buen estado'} ·{' '}
-                                  {entry.createdAt || 'Sin fecha'}
-                                </p>
-                              </div>
-
-                              {canEdit && (
-                                <button
-                                  onClick={() =>
-                                    handleDeleteCountEntry(localKey, entry.id)
-                                  }
-                                  className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl border border-red-900 bg-red-950/40 px-4 py-2 font-medium text-red-300 transition hover:bg-red-900/40"
-                                >
-                                  <Trash2 size={16} />
-                                  Eliminar
-                                </button>
-                              )}
-                            </div>
-                          ))
-                        )}
                       </div>
                     </div>
-                  )}
+                  );
+                })
+              )}
+            </div>
+
+            {filteredItems.length > 80 && (
+              <p className="text-sm text-zinc-500">
+                Se muestran los primeros 80 resultados. Usa la búsqueda para
+                filtrar más.
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
+        <div className="mb-4">
+          <h2 className="text-2xl font-bold text-white">
+            Historial de inventarios
+          </h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Aquí solo aparecen inventarios ya guardados de forma final.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          {loadingHistory ? (
+            <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
+              Cargando historial...
+            </div>
+          ) : allInventories.length === 0 ? (
+            <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
+              No hay inventarios guardados todavía.
+            </div>
+          ) : (
+            allInventories.slice(0, 20).map((inv) => (
+              <div
+                key={inv.id}
+                className="rounded-2xl border border-zinc-800 bg-black p-4"
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-white">
+                      {inv.date || 'Sin fecha'}
+                    </p>
+
+                    <p className="mt-1 text-sm text-zinc-400">
+                      Semana {inv.week || '—'} · {inv.cedis || 'Sin cedis'}
+                    </p>
+
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {inv.items?.length || 0} productos
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Link
+                      to={`/inventario/${inv.id}`}
+                      className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-2 font-medium text-white transition hover:border-zinc-500"
+                    >
+                      Ver detalle
+                    </Link>
+
+                    <Link
+                      to={`/inventario/${inv.id}/editar`}
+                      className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-blue-700 bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-500"
+                    >
+                      Editar
+                    </Link>
+
+                    <button
+                      onClick={() => exportInventoryToPDF(inv)}
+                      className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-2 font-medium text-white transition hover:bg-emerald-500"
+                    >
+                      <Download size={16} />
+                      Descargar
+                    </button>
+                  </div>
                 </div>
-              );
-            })
+              </div>
+            ))
           )}
         </div>
       </section>
 
-      {/* Notas generales */}
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
-        <div className="mb-3 flex items-center gap-3">
-          <AlertTriangle size={18} className="text-yellow-400" />
-          <h2 className="text-xl font-bold text-white">Notas generales</h2>
+      <section className="rounded-3xl border border-yellow-900/60 bg-yellow-950/20 p-5">
+        <div className="flex gap-3">
+          <AlertTriangle
+            className="mt-0.5 shrink-0 text-yellow-400"
+            size={20}
+          />
+          <div className="text-sm leading-7 text-yellow-100">
+            Mientras el inventario esté en borrador, los usuarios pueden seguir
+            contando y ver cambios en tiempo real. Solo al guardar final pasará
+            al historial y quedará listo para descargar.
+          </div>
         </div>
-
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          rows={5}
-          placeholder="Escribe aquí observaciones generales del inventario..."
-          className="w-full rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-white outline-none transition focus:border-blue-500"
-          readOnly={!canEdit}
-        />
-
-        {!canEdit && (
-          <p className="mt-2 text-sm text-zinc-500">
-            Las notas generales solo pueden editarse en el inventario del día.
-          </p>
-        )}
       </section>
     </div>
   );
