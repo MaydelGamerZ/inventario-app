@@ -13,8 +13,10 @@ export default function AppRouter() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Ruta pública */}
         <Route path="/login" element={<LoginPage />} />
 
+        {/* Rutas protegidas */}
         <Route
           element={
             <ProtectedRoute>
@@ -22,6 +24,7 @@ export default function AppRouter() {
             </ProtectedRoute>
           }
         >
+          <Route index element={<HomePage />} />
           <Route path="/" element={<HomePage />} />
           <Route path="/inventario-diario" element={<InventoryDayPage />} />
           <Route path="/inventario/:id" element={<InventoryDetailPage />} />
@@ -33,6 +36,7 @@ export default function AppRouter() {
           <Route path="/productos" element={<ProductsPage />} />
         </Route>
 
+        {/* Ruta no encontrada */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </BrowserRouter>

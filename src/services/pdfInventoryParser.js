@@ -28,15 +28,25 @@ function cleanLine(value = '') {
     String(value)
       .replace(/[_]+/g, ' ')
       .replace(/[|]+/g, ' ')
+      .replace(/[•]+/g, ' ')
       .replace(/—/g, ' ')
       .replace(/–/g, ' ')
+      .replace(/\u00A0/g, ' ')
   );
+}
+
+function normalizeForCompare(value = '') {
+  return cleanLine(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 }
 
 function parseNumber(value) {
   if (value === undefined || value === null) return 0;
 
-  const normalized = String(value).replace(/,/g, '').trim();
+  const normalized = String(value).replace(/\s/g, '').replace(/,/g, '').trim();
+
   if (!normalized) return 0;
 
   const parsed = Number(normalized);
@@ -63,28 +73,39 @@ function parseSpanishDateToKey(dateLabel) {
 }
 
 function isDecorativeLine(line) {
-  if (!line) return true;
+  const normalized = normalizeForCompare(line);
+
+  if (!normalized) return true;
 
   return (
-    /^PRODUCTO\b/i.test(line) ||
-    /^CANTIDAD\b/i.test(line) ||
-    /^NO\s*DISPONIB/i.test(line) ||
-    /^CONTEO FISICO/i.test(line) ||
-    /^TOTAL DIFERENCIA/i.test(line) ||
-    /^OBSERVACIÓN/i.test(line) ||
-    /^DISTRIBUCIONES A DETALLE/i.test(line) ||
-    /^INFORME DE INVENTARIO DIARIO/i.test(line) ||
-    /^Hoja\s+\d+\s+de\s+\d+/i.test(line) ||
-    /^-+$/.test(line)
+    normalized.startsWith('producto') ||
+    normalized.startsWith('cantidad') ||
+    normalized.startsWith('no disponible') ||
+    normalized.startsWith('no disp') ||
+    normalized.startsWith('conteo fisico') ||
+    normalized.startsWith('total diferencia') ||
+    normalized.startsWith('observacion') ||
+    normalized.startsWith('distribuciones a detalle') ||
+    normalized.startsWith('informe de inventario diario') ||
+    /^hoja \d+ de \d+$/.test(normalized) ||
+    /^-+$/.test(normalized)
   );
 }
 
 function isCategoryHeader(line) {
-  return /^\d{2}\s*-\s*.+\s*-\s*\d+\s*-\s*.+$/i.test(line);
+  const cleaned = cleanLine(line);
+
+  return /^\d{2}\s*-\s*.+?\s*-\s*\d+\s*-\s*.+$/i.test(cleaned);
 }
 
 function isTotalLine(line) {
-  return /^TOTAL(?:\s+GENERAL)?\.-/i.test(line);
+  const normalized = normalizeForCompare(line);
+
+  return (
+    normalized.startsWith('total.-') ||
+    normalized.startsWith('total general.-') ||
+    normalized.startsWith('total general')
+  );
 }
 
 function parseCategoryHeader(rawHeader) {
@@ -119,6 +140,7 @@ function parseProductLine(line) {
   if (isCategoryHeader(cleaned)) return null;
   if (isTotalLine(cleaned)) return null;
 
+  // Busca dos números al final: cantidad y no disponible
   const match = cleaned.match(/^(.*?)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)$/);
 
   if (!match) return null;
@@ -140,10 +162,15 @@ function extractMetaFromText(fullText) {
   const normalized = normalizeSpaces(fullText);
 
   const weekMatch = normalized.match(/Semana:\s*(\d+)/i);
+
   const dateMatch = normalized.match(
     /Fecha:\s*([0-9]{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4})/i
   );
-  const cedisMatch = normalized.match(/Cedis:\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]*)/i);
+
+  const cedisMatch =
+    normalized.match(/Cedis:\s*([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\s-]*)/i) ||
+    normalized.match(/CEDIS:\s*([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\s-]*)/i);
+
   const totalGeneralMatch = normalized.match(
     /TOTAL GENERAL\.-\s*([-\d,]+)\s+([-\d,]+)/i
   );
@@ -177,7 +204,7 @@ async function extractLinesFromPdf(file) {
     const rowsMap = new Map();
 
     for (const item of textContent.items) {
-      if (!item.str || !String(item.str).trim()) continue;
+      if (!item?.str || !String(item.str).trim()) continue;
 
       const x = item.transform[4];
       const y = Math.round(item.transform[5]);
@@ -209,9 +236,27 @@ async function extractLinesFromPdf(file) {
   return pages;
 }
 
+function buildCategoryKey(category) {
+  return [
+    category?.supplierCode || '',
+    category?.categoryCode || '',
+    category?.categoryName || '',
+  ].join('::');
+}
+
+function computeItemStatus(quantity, noDisponible) {
+  if (quantity <= 0) return 'FALTANTE';
+  if (noDisponible > 0) return 'ALERTA';
+  return 'OK';
+}
+
 export async function parseInventoryPdf(file) {
   if (!file) {
     throw new Error('No se recibió ningún archivo PDF.');
+  }
+
+  if (file.type && file.type !== 'application/pdf') {
+    throw new Error('El archivo seleccionado no es un PDF válido.');
   }
 
   const pages = await extractLinesFromPdf(file);
@@ -241,7 +286,8 @@ export async function parseInventoryPdf(file) {
 
     if (isCategoryHeader(line)) {
       currentCategory = parseCategoryHeader(line);
-      const categoryKey = `${currentCategory.supplierCode}-${currentCategory.categoryCode}-${currentCategory.categoryName}`;
+
+      const categoryKey = buildCategoryKey(currentCategory);
 
       if (!categoriesMap.has(categoryKey)) {
         categoriesMap.set(categoryKey, {
@@ -269,15 +315,13 @@ export async function parseInventoryPdf(file) {
       continue;
     }
 
-    const categoryKey = `${currentCategory.supplierCode}-${currentCategory.categoryCode}-${currentCategory.categoryName}`;
+    const categoryKey = buildCategoryKey(currentCategory);
     const categoryRef = categoriesMap.get(categoryKey);
 
-    const status =
-      parsedProduct.quantity <= 0
-        ? 'FALTANTE'
-        : parsedProduct.noDisponible > 0
-          ? 'ALERTA'
-          : 'OK';
+    const status = computeItemStatus(
+      parsedProduct.quantity,
+      parsedProduct.noDisponible
+    );
 
     const item = {
       productName: parsedProduct.productName,
@@ -292,6 +336,7 @@ export async function parseInventoryPdf(file) {
       total: '',
       difference: '',
       observation: '',
+      countEntries: [],
       status,
     };
 
@@ -308,6 +353,12 @@ export async function parseInventoryPdf(file) {
     throw new Error('No se detectaron productos válidos dentro del PDF.');
   }
 
+  const categories = Array.from(categoriesMap.values()).sort((a, b) =>
+    a.categoryName.localeCompare(b.categoryName, 'es', {
+      sensitivity: 'base',
+    })
+  );
+
   return {
     sourceFileName: file.name,
     week: meta.week,
@@ -316,7 +367,7 @@ export async function parseInventoryPdf(file) {
     cedis: meta.cedis,
     totalGeneral: meta.totalGeneral,
     totalGeneralNoDisponible: meta.totalGeneralNoDisponible,
-    categories: Array.from(categoriesMap.values()),
+    categories,
     items,
   };
 }

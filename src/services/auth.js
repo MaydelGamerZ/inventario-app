@@ -1,28 +1,21 @@
-import {
-  signInWithEmailAndPassword,
-  signInWithPopup,
-  signOut,
-} from "firebase/auth";
-import { auth, googleProvider } from "../firebase.js";
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { auth } from '../firebase.js';
 
 /**
- * Signs in a user using email and password.
+ * Inicia sesión con correo y contraseña.
  * @param {string} email
  * @param {string} password
  */
 export async function loginWithEmail(email, password) {
+  if (!email || !password) {
+    throw new Error('Correo y contraseña son obligatorios.');
+  }
+
   return await signInWithEmailAndPassword(auth, email, password);
 }
 
 /**
- * Signs in a user with Google popup.
- */
-export async function loginWithGoogle() {
-  return await signInWithPopup(auth, googleProvider);
-}
-
-/**
- * Signs out the currently authenticated user.
+ * Cierra la sesión del usuario actual.
  */
 export async function logoutUser() {
   return await signOut(auth);

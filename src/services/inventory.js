@@ -11,7 +11,7 @@ import {
   serverTimestamp,
   updateDoc,
   where,
-  onSnapshot, // Se importa onSnapshot para escuchar cambios en tiempo real
+  onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -39,7 +39,6 @@ function safeNumber(value) {
    INVENTARIOS
 ========================= */
 
-// Obtiene todos los inventarios (ordenados por fecha)
 export async function getAllInventories() {
   const q = query(inventoriesRef, orderBy('dateKey', 'desc'));
   const snapshot = await getDocs(q);
@@ -50,16 +49,13 @@ export async function getAllInventories() {
   }));
 }
 
-// Obtiene un inventario por ID (lectura puntual)
 export async function getInventoryById(inventoryId) {
   if (!inventoryId) return null;
 
   const ref = doc(db, 'inventories', inventoryId);
   const snapshot = await getDoc(ref);
 
-  if (!snapshot.exists()) {
-    return null;
-  }
+  if (!snapshot.exists()) return null;
 
   return {
     id: snapshot.id,
@@ -67,13 +63,9 @@ export async function getInventoryById(inventoryId) {
   };
 }
 
-// Obtiene el inventario de una fecha específica (lectura puntual)
 export async function getInventoryByDate(dateKey) {
   const normalizedDateKey = safeString(dateKey);
-
-  if (!normalizedDateKey) {
-    return null;
-  }
+  if (!normalizedDateKey) return null;
 
   const q = query(
     inventoriesRef,
@@ -82,20 +74,16 @@ export async function getInventoryByDate(dateKey) {
   );
 
   const snapshot = await getDocs(q);
+  if (snapshot.empty) return null;
 
-  if (snapshot.empty) {
-    return null;
-  }
-
-  const firstDoc = snapshot.docs[0];
+  const docSnap = snapshot.docs[0];
 
   return {
-    id: firstDoc.id,
-    ...firstDoc.data(),
+    id: docSnap.id,
+    ...docSnap.data(),
   };
 }
 
-// Crea un nuevo inventario
 export async function createInventory(data) {
   const payload = {
     date: safeString(data.date),
@@ -107,6 +95,7 @@ export async function createInventory(data) {
     sourceFileName: safeString(data.sourceFileName),
     importedByEmail: safeString(data.importedByEmail),
     notes: safeString(data.notes),
+
     totals: {
       totalGeneral: safeNumber(data.totals?.totalGeneral),
       totalGeneralNoDisponible: safeNumber(
@@ -115,26 +104,26 @@ export async function createInventory(data) {
       productCount: safeNumber(data.totals?.productCount),
       categoryCount: safeNumber(data.totals?.categoryCount),
     },
+
     categories: safeArray(data.categories),
     items: safeArray(data.items),
+
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-    importedAt: serverTimestamp(),
   };
 
   const docRef = await addDoc(inventoriesRef, payload);
   return docRef.id;
 }
 
-// Actualiza un inventario existente (campo a campo)
+/**
+ * ⚠️ ACTUALIZACIÓN SEGURA (no pisa todo)
+ */
 export async function updateInventory(inventoryId, data) {
-  const normalizedId = safeString(inventoryId);
+  const id = safeString(inventoryId);
+  if (!id) throw new Error('ID inválido');
 
-  if (!normalizedId) {
-    throw new Error('No se recibió el id del inventario.');
-  }
-
-  const ref = doc(db, 'inventories', normalizedId);
+  const ref = doc(db, 'inventories', id);
 
   const payload = {
     date: safeString(data.date),
@@ -142,10 +131,8 @@ export async function updateInventory(inventoryId, data) {
     week: safeString(data.week),
     cedis: safeString(data.cedis),
     status: safeString(data.status) || 'Abierto',
-    sourceType: safeString(data.sourceType) || 'manual',
-    sourceFileName: safeString(data.sourceFileName),
-    importedByEmail: safeString(data.importedByEmail),
     notes: safeString(data.notes),
+
     totals: {
       totalGeneral: safeNumber(data.totals?.totalGeneral),
       totalGeneralNoDisponible: safeNumber(
@@ -154,129 +141,90 @@ export async function updateInventory(inventoryId, data) {
       productCount: safeNumber(data.totals?.productCount),
       categoryCount: safeNumber(data.totals?.categoryCount),
     },
+
     categories: safeArray(data.categories),
     items: safeArray(data.items),
+
     updatedAt: serverTimestamp(),
-    importedAt: serverTimestamp(),
   };
 
   await updateDoc(ref, payload);
 }
 
-// Guarda un inventario proveniente de un PDF. Si ya existe un inventario con la misma fecha, lo actualiza.
-export async function saveDailyInventoryFromPdf(
-  parsedInventory,
-  userEmail = ''
-) {
-  const dateKey = safeString(parsedInventory?.dateKey);
+/**
+ * Guardar desde PDF
+ */
+export async function saveDailyInventoryFromPdf(parsed, userEmail = '') {
+  const dateKey = safeString(parsed?.dateKey);
+  if (!dateKey) throw new Error('Fecha inválida en PDF');
 
-  if (!dateKey) {
-    throw new Error('El PDF no tiene una fecha válida.');
-  }
-
-  const existingInventory = await getInventoryByDate(dateKey);
+  const existing = await getInventoryByDate(dateKey);
 
   const payload = {
-    date: safeString(parsedInventory?.dateLabel),
+    date: safeString(parsed?.dateLabel),
     dateKey,
-    week: safeString(parsedInventory?.week),
-    cedis: safeString(parsedInventory?.cedis),
+    week: safeString(parsed?.week),
+    cedis: safeString(parsed?.cedis),
     status: 'Abierto',
     sourceType: 'pdf',
-    sourceFileName: safeString(parsedInventory?.sourceFileName),
+    sourceFileName: safeString(parsed?.sourceFileName),
     importedByEmail: safeString(userEmail),
-    notes: '',
+
     totals: {
-      totalGeneral: safeNumber(parsedInventory?.totalGeneral),
+      totalGeneral: safeNumber(parsed?.totalGeneral),
       totalGeneralNoDisponible: safeNumber(
-        parsedInventory?.totalGeneralNoDisponible
+        parsed?.totalGeneralNoDisponible
       ),
-      productCount: safeArray(parsedInventory?.items).length,
-      categoryCount: safeArray(parsedInventory?.categories).length,
+      productCount: safeArray(parsed?.items).length,
+      categoryCount: safeArray(parsed?.categories).length,
     },
-    categories: safeArray(parsedInventory?.categories),
-    items: safeArray(parsedInventory?.items),
+
+    categories: safeArray(parsed?.categories),
+    items: safeArray(parsed?.items),
   };
 
-  if (existingInventory) {
-    await updateInventory(existingInventory.id, payload);
-    return await getInventoryById(existingInventory.id);
+  if (existing) {
+    await updateInventory(existing.id, payload);
+    return await getInventoryById(existing.id);
   }
 
-  const newInventoryId = await createInventory(payload);
-  return await getInventoryById(newInventoryId);
+  const id = await createInventory(payload);
+  return await getInventoryById(id);
 }
 
 /**
- * Guarda los detalles de inventario (incluyendo countEntries) y conserva notas.
- * Almacena los conteos en el campo "countEntries" para cada producto.
+ * Guarda conteos
  */
 export async function saveInventoryDetail(inventoryId, items, notes = '') {
-  const currentInventory = await getInventoryById(inventoryId);
+  const inv = await getInventoryById(inventoryId);
+  if (!inv) throw new Error('Inventario no encontrado');
 
-  if (!currentInventory) {
-    throw new Error('Inventario no encontrado.');
-  }
+  const normalizedItems = safeArray(items).map((item) => ({
+    productName: safeString(item.productName),
+    categoryName: safeString(item.categoryName),
+    supplierName: safeString(item.supplierName),
 
-  // Normaliza cada item y conserva su historial de conteos
-  const normalizedItems = safeArray(items).map((item) => {
-    const expectedQuantity = safeNumber(item.expectedQuantity);
-    const unavailableQuantity = safeNumber(item.unavailableQuantity);
-    const countedQuantity =
-      item.countedQuantity === '' ||
-      item.countedQuantity === null ||
-      item.countedQuantity === undefined
-        ? ''
-        : safeNumber(item.countedQuantity);
+    expectedQuantity: safeNumber(item.expectedQuantity),
+    unavailableQuantity: safeNumber(item.unavailableQuantity),
 
-    const total =
-      item.total === '' || item.total === null || item.total === undefined
-        ? ''
-        : safeNumber(item.total);
+    countedQuantity:
+      item.countedQuantity === '' ? '' : safeNumber(item.countedQuantity),
 
-    const difference =
-      item.difference === '' ||
-      item.difference === null ||
-      item.difference === undefined
-        ? ''
-        : safeNumber(item.difference);
+    observation: safeString(item.observation),
+    status: safeString(item.status) || 'OK',
 
-    // Sanitizamos countEntries para incluir todos los conteos
-    const countEntries = safeArray(item.countEntries).map((entry) => ({
-      id:
-        safeString(entry.id) ||
-        `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      quantity:
-        entry.quantity === '' ||
-        entry.quantity === null ||
-        entry.quantity === undefined
-          ? 0
-          : safeNumber(entry.quantity),
+    countEntries: safeArray(item.countEntries).map((entry) => ({
+      id: safeString(entry.id) || `${Date.now()}`,
+      quantity: safeNumber(entry.quantity),
       comment: safeString(entry.comment),
-      observationType: safeString(entry.observationType) || 'Buen estado',
-      createdAt: safeString(entry.createdAt),
-    }));
-
-    return {
-      productName: safeString(item.productName),
-      categoryName: safeString(item.categoryName),
-      categoryCode: safeString(item.categoryCode),
-      categoryRaw: safeString(item.categoryRaw),
-      supplierName: safeString(item.supplierName),
-      supplierCode: safeString(item.supplierCode),
-      expectedQuantity,
-      unavailableQuantity,
-      countedQuantity,
-      total,
-      difference,
-      observation: safeString(item.observation),
-      status: safeString(item.status) || 'OK',
-      countEntries, // Conservamos los conteos en la BD
-    };
-  });
+      observationType:
+        safeString(entry.observationType) || 'Buen estado',
+      createdAt: entry.createdAt || new Date().toISOString(),
+    })),
+  }));
 
   await updateInventory(inventoryId, {
-    ...currentInventory,
+    ...inv,
     items: normalizedItems,
     notes: safeString(notes),
   });
@@ -285,157 +233,61 @@ export async function saveInventoryDetail(inventoryId, items, notes = '') {
 }
 
 /* =========================
-   SUSCRIPCIONES EN TIEMPO REAL
+   SUSCRIPCIONES
 ========================= */
 
-/**
- * Escucha cambios en todos los inventarios. Devuelve una función para cancelar.
- * @param {(inventories: any[]) => void} callback
- */
 export function subscribeAllInventories(callback) {
   const q = query(inventoriesRef, orderBy('dateKey', 'desc'));
-  return onSnapshot(q, (snapshot) => {
-    const inventories = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-    callback(inventories);
-  });
-}
 
-/**
- * Escucha cambios en un inventario por id. Devuelve una función para cancelar.
- * @param {string} inventoryId
- * @param {(data: any|null) => void} callback
- */
-export function subscribeInventoryById(inventoryId, callback) {
-  const normalizedId = safeString(inventoryId);
-  if (!normalizedId) {
-    callback(null);
-    return () => {};
-  }
-  const ref = doc(db, 'inventories', normalizedId);
-  return onSnapshot(ref, (snapshot) => {
-    if (!snapshot.exists()) {
-      callback(null);
-      return;
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const data = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      callback(data);
+    },
+    (error) => {
+      console.error('Error en subscribeAllInventories:', error);
+      callback([]);
     }
-    callback({
-      id: snapshot.id,
-      ...snapshot.data(),
-    });
-  });
+  );
 }
 
-/**
- * Escucha el inventario de una fecha específica (por dateKey). Devuelve una función para cancelar.
- * @param {string} dateKey
- * @param {(data: any|null) => void} callback
- */
+export function subscribeInventoryById(id, callback) {
+  const ref = doc(db, 'inventories', id);
+
+  return onSnapshot(
+    ref,
+    (snap) => {
+      if (!snap.exists()) return callback(null);
+      callback({ id: snap.id, ...snap.data() });
+    },
+    (error) => {
+      console.error('Error en subscribeInventoryById:', error);
+      callback(null);
+    }
+  );
+}
+
 export function subscribeInventoryByDate(dateKey, callback) {
-  const normalizedDateKey = safeString(dateKey);
-  if (!normalizedDateKey) {
-    callback(null);
-    return () => {};
-  }
   const q = query(
     inventoriesRef,
-    where('dateKey', '==', normalizedDateKey),
+    where('dateKey', '==', safeString(dateKey)),
     limit(1)
   );
-  return onSnapshot(q, (snapshot) => {
-    if (snapshot.empty) {
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      if (snapshot.empty) return callback(null);
+      const docSnap = snapshot.docs[0];
+      callback({ id: docSnap.id, ...docSnap.data() });
+    },
+    (error) => {
+      console.error('Error en subscribeInventoryByDate:', error);
       callback(null);
-      return;
     }
-    const docSnapshot = snapshot.docs[0];
-    callback({
-      id: docSnapshot.id,
-      ...docSnapshot.data(),
-    });
-  });
-}
-
-/* =========================
-   CATEGORÍAS
-========================= */
-export async function getCategories() {
-  const q = query(categoriesRef, orderBy('name', 'asc'));
-  const snapshot = await getDocs(q);
-
-  return snapshot.docs.map((item) => ({
-    id: item.id,
-    ...item.data(),
-  }));
-}
-
-export async function createCategory(data) {
-  const name = safeString(data.name);
-
-  if (!name) {
-    throw new Error('La categoría necesita nombre.');
-  }
-
-  const payload = {
-    name,
-    description: safeString(data.description),
-    createdAt: serverTimestamp(),
-  };
-
-  const docRef = await addDoc(categoriesRef, payload);
-  return docRef.id;
-}
-
-export async function deleteCategory(categoryId) {
-  const normalizedId = safeString(categoryId);
-
-  if (!normalizedId) {
-    throw new Error('No se recibió el id de la categoría.');
-  }
-
-  await deleteDoc(doc(db, 'categories', normalizedId));
-}
-
-/* =========================
-   PRODUCTOS
-========================= */
-export async function getProducts() {
-  const q = query(productsRef, orderBy('name', 'asc'));
-  const snapshot = await getDocs(q);
-
-  return snapshot.docs.map((item) => ({
-    id: item.id,
-    ...item.data(),
-  }));
-}
-
-export async function createProduct(data) {
-  const name = safeString(data.name);
-
-  if (!name) {
-    throw new Error('El producto necesita nombre.');
-  }
-
-  const payload = {
-    name,
-    categoryId: safeString(data.categoryId),
-    categoryName: safeString(data.categoryName),
-    presentation: safeString(data.presentation),
-    weight: safeString(data.weight),
-    sku: safeString(data.sku),
-    createdAt: serverTimestamp(),
-  };
-
-  const docRef = await addDoc(productsRef, payload);
-  return docRef.id;
-}
-
-export async function deleteProduct(productId) {
-  const normalizedId = safeString(productId);
-
-  if (!normalizedId) {
-    throw new Error('No se recibió el id del producto.');
-  }
-
-  await deleteDoc(doc(db, 'products', normalizedId));
+  );
 }
