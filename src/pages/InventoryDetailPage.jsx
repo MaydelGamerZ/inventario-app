@@ -12,8 +12,11 @@ import {
   Pencil,
   Search,
 } from 'lucide-react';
-import { subscribeAllInventories } from '../services/inventory';
-import { exportInventoryToPDF } from '../services/pdfExporter';
+import {
+  subscribeInventoryById,
+  exportInventoryToPDF,
+} from '../services/inventory';
+import { exportInventoryToPDF as exportInventoryPdfFile } from '../services/pdfExporter';
 
 function safeNumber(value) {
   const parsed = Number(value);
@@ -141,13 +144,10 @@ export default function InventoryDetailPage() {
     setLoading(true);
     setError('');
 
-    const unsubscribe = subscribeAllInventories((list) => {
-      const inventories = Array.isArray(list) ? list : [];
-      const found = inventories.find((item) => item?.id === id) || null;
+    const unsubscribe = subscribeInventoryById(id, (doc) => {
+      setInventory(doc || null);
 
-      setInventory(found);
-
-      if (!found) {
+      if (!doc) {
         setError('No se encontró el inventario solicitado.');
       } else {
         setError('');
@@ -255,7 +255,7 @@ export default function InventoryDetailPage() {
             {inventory?.status === 'GUARDADO' && (
               <button
                 type="button"
-                onClick={() => exportInventoryToPDF(inventory)}
+                onClick={() => exportInventoryPdfFile(inventory)}
                 className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500"
               >
                 <Download size={18} />
