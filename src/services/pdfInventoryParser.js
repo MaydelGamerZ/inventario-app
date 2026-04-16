@@ -1,6 +1,8 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
+// Mantén el worker local para navegadores normales.
+// En Apple móvil/PWA lo desactivaremos al cargar el PDF.
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
 
 const MONTHS_ES = {
@@ -172,9 +174,9 @@ function parseProductLine(line) {
   if (!productName) return null;
 
   return {
-    productName: productName,
-    quantity: quantity,
-    noDisponible: noDisponible,
+    productName,
+    quantity,
+    noDisponible,
   };
 }
 
@@ -200,8 +202,8 @@ function extractMetaFromText(fullText) {
 
   return {
     week: weekMatch ? normalizeSpaces(weekMatch[1]) : '',
-    dateLabel: dateLabel,
-    dateKey: dateKey,
+    dateLabel,
+    dateKey,
     cedis: cedisMatch ? normalizeSpaces(cedisMatch[1]) : '',
     totalGeneral: totalGeneralMatch ? parseNumber(totalGeneralMatch[1]) : 0,
     totalGeneralNoDisponible: totalGeneralMatch
@@ -210,31 +212,65 @@ function extractMetaFromText(fullText) {
   };
 }
 
+function buildCategoryKey(category) {
+  return [
+    category && category.supplierCode ? category.supplierCode : '',
+    category && category.categoryCode ? category.categoryCode : '',
+    category && category.categoryName ? category.categoryName : '',
+  ].join('::');
+}
+
+function computeItemStatus(quantity, noDisponible) {
+  if (quantity <= 0) return 'FALTANTE';
+  if (noDisponible > 0) return 'ALERTA';
+  return 'OK';
+}
+
+function isStandaloneMode() {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return (
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(display-mode: standalone)').matches
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isLegacyStandalone() {
+  if (typeof navigator === 'undefined') return false;
+  return typeof navigator.standalone === 'boolean' && navigator.standalone;
+}
+
+function isAppleMobileEnvironment() {
+  if (typeof navigator === 'undefined') return false;
+
+  const ua = navigator.userAgent || '';
+  const platform = navigator.platform || '';
+  const maxTouchPoints = navigator.maxTouchPoints || 0;
+
+  const isiPhoneOrIPad =
+    /iPhone|iPad|iPod/i.test(ua) || /iPhone|iPad|iPod/i.test(platform);
+
+  const isModernIPadOnMac = /Mac/i.test(platform) && maxTouchPoints > 1;
+
+  return isiPhoneOrIPad || isModernIPadOnMac;
+}
+
+function shouldDisablePdfWorker() {
+  // En Apple móvil, y especialmente en modo app instalada/PWA,
+  // PDF.js tiende a fallar más con workers y transferencia de buffers.
+  return (
+    isAppleMobileEnvironment() || isStandaloneMode() || isLegacyStandalone()
+  );
+}
+
 function readFileAsArrayBuffer(file) {
   return new Promise(function (resolve, reject) {
     if (!file) {
       reject(new Error('No se recibió archivo.'));
-      return;
-    }
-
-    if (typeof file.arrayBuffer === 'function') {
-      file
-        .arrayBuffer()
-        .then(resolve)
-        .catch(function () {
-          const reader = new FileReader();
-
-          reader.onload = function () {
-            resolve(reader.result);
-          };
-
-          reader.onerror = function () {
-            reject(new Error('No se pudo leer el archivo PDF.'));
-          };
-
-          reader.readAsArrayBuffer(file);
-        });
-
       return;
     }
 
@@ -252,73 +288,128 @@ function readFileAsArrayBuffer(file) {
   });
 }
 
-async function extractLinesFromPdf(file) {
+async function loadPdfDocument(file) {
   const arrayBuffer = await readFileAsArrayBuffer(file);
-  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-  const pdf = await loadingTask.promise;
 
-  const pages = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const textContent = await page.getTextContent();
-
-    const rowsMap = new Map();
-
-    for (let i = 0; i < textContent.items.length; i += 1) {
-      const item = textContent.items[i];
-      if (!item || !item.str || !String(item.str).trim()) continue;
-
-      const x = item.transform[4];
-      const y = Math.round(item.transform[5]);
-
-      if (!rowsMap.has(y)) {
-        rowsMap.set(y, []);
-      }
-
-      rowsMap.get(y).push({
-        x: x,
-        text: item.str,
-      });
-    }
-
-    const rows = Array.from(rowsMap.entries())
-      .sort(function (a, b) {
-        return b[0] - a[0];
-      })
-      .map(function (entry) {
-        const rowItems = entry[1];
-
-        return rowItems
-          .sort(function (a, b) {
-            return a.x - b.x;
-          })
-          .map(function (part) {
-            return part.text;
-          })
-          .join(' ');
-      })
-      .map(cleanLine)
-      .filter(Boolean);
-
-    pages.push(rows);
+  if (!arrayBuffer) {
+    throw new Error('No se pudo obtener el contenido binario del PDF.');
   }
 
-  return pages;
+  // Usar Uint8Array ayuda a evitar algunos problemas de transferencia en iOS.
+  const data =
+    arrayBuffer instanceof Uint8Array
+      ? arrayBuffer
+      : new Uint8Array(arrayBuffer);
+
+  const disableWorker = shouldDisablePdfWorker();
+
+  const loadingTask = pdfjsLib.getDocument({
+    data,
+    disableWorker,
+    isEvalSupported: false,
+    useSystemFonts: true,
+    stopAtErrors: false,
+    disableRange: true,
+    disableStream: true,
+    disableAutoFetch: true,
+    verbosity: 0,
+  });
+
+  try {
+    const pdf = await loadingTask.promise;
+    return { pdf, loadingTask };
+  } catch (error) {
+    try {
+      loadingTask.destroy();
+    } catch {
+      // no-op
+    }
+
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : String(error || '');
+
+    if (
+      /transfer/i.test(message) ||
+      /worker/i.test(message) ||
+      /arraybuffer/i.test(message) ||
+      /webkit/i.test(message) ||
+      /safari/i.test(message) ||
+      /unsupported/i.test(message) ||
+      /setting up fake worker/i.test(message)
+    ) {
+      throw new Error(
+        'El iPhone pudo seleccionar el archivo, pero falló al procesar el PDF. Abre esta misma página en Safari normal o usa otro navegador/dispositivo.'
+      );
+    }
+
+    throw new Error(
+      'No se pudo abrir el PDF en este dispositivo. Intenta con Safari normal o con otro dispositivo.'
+    );
+  }
 }
 
-function buildCategoryKey(category) {
-  return [
-    category && category.supplierCode ? category.supplierCode : '',
-    category && category.categoryCode ? category.categoryCode : '',
-    category && category.categoryName ? category.categoryName : '',
-  ].join('::');
-}
+async function extractLinesFromPdf(file) {
+  const { pdf, loadingTask } = await loadPdfDocument(file);
 
-function computeItemStatus(quantity, noDisponible) {
-  if (quantity <= 0) return 'FALTANTE';
-  if (noDisponible > 0) return 'ALERTA';
-  return 'OK';
+  try {
+    const pages = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const textContent = await page.getTextContent();
+
+      const rowsMap = new Map();
+
+      for (let i = 0; i < textContent.items.length; i += 1) {
+        const item = textContent.items[i];
+        if (!item || !item.str || !String(item.str).trim()) continue;
+
+        const transform = Array.isArray(item.transform) ? item.transform : [];
+        const x = Number(transform[4] || 0);
+        const y = Math.round(Number(transform[5] || 0));
+
+        if (!rowsMap.has(y)) {
+          rowsMap.set(y, []);
+        }
+
+        rowsMap.get(y).push({
+          x,
+          text: item.str,
+        });
+      }
+
+      const rows = Array.from(rowsMap.entries())
+        .sort(function (a, b) {
+          return b[0] - a[0];
+        })
+        .map(function (entry) {
+          const rowItems = entry[1];
+
+          return rowItems
+            .sort(function (a, b) {
+              return a.x - b.x;
+            })
+            .map(function (part) {
+              return part.text;
+            })
+            .join(' ');
+        })
+        .map(cleanLine)
+        .filter(Boolean);
+
+      pages.push(rows);
+    }
+
+    return pages;
+  } finally {
+    try {
+      await loadingTask.destroy();
+    } catch {
+      // no-op
+    }
+  }
 }
 
 export async function parseInventoryPdf(file) {
@@ -417,7 +508,7 @@ export async function parseInventoryPdf(file) {
         difference: '',
         observation: '',
         countEntries: [],
-        status: status,
+        status,
       };
 
       items.push(item);
@@ -448,8 +539,8 @@ export async function parseInventoryPdf(file) {
       cedis: meta.cedis,
       totalGeneral: meta.totalGeneral,
       totalGeneralNoDisponible: meta.totalGeneralNoDisponible,
-      categories: categories,
-      items: items,
+      categories,
+      items,
     };
   } catch (error) {
     console.error('Error en parseInventoryPdf:', error);
