@@ -1,8 +1,6 @@
-import * as pdfjsLib from 'pdfjs-dist';
-import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import * as pdfjsLib from 'pdfjs-dist/build/pdf';
+import workerSrc from 'pdfjs-dist/build/pdf.worker.min.js?url';
 
-// Mantén el worker local para navegadores normales.
-// En Apple móvil/PWA lo desactivaremos al cargar el PDF.
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
 
 const MONTHS_ES = {
@@ -212,18 +210,25 @@ function extractMetaFromText(fullText) {
   };
 }
 
-function buildCategoryKey(category) {
-  return [
-    category && category.supplierCode ? category.supplierCode : '',
-    category && category.categoryCode ? category.categoryCode : '',
-    category && category.categoryName ? category.categoryName : '',
-  ].join('::');
-}
+function readFileAsArrayBuffer(file) {
+  return new Promise(function (resolve, reject) {
+    if (!file) {
+      reject(new Error('No se recibió archivo.'));
+      return;
+    }
 
-function computeItemStatus(quantity, noDisponible) {
-  if (quantity <= 0) return 'FALTANTE';
-  if (noDisponible > 0) return 'ALERTA';
-  return 'OK';
+    const reader = new FileReader();
+
+    reader.onload = function () {
+      resolve(reader.result);
+    };
+
+    reader.onerror = function () {
+      reject(new Error('No se pudo leer el archivo PDF.'));
+    };
+
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 function isStandaloneMode() {
@@ -259,99 +264,51 @@ function isAppleMobileEnvironment() {
   return isiPhoneOrIPad || isModernIPadOnMac;
 }
 
-function shouldDisablePdfWorker() {
-  // En Apple móvil, y especialmente en modo app instalada/PWA,
-  // PDF.js tiende a fallar más con workers y transferencia de buffers.
+function shouldDisableWorker() {
   return (
     isAppleMobileEnvironment() || isStandaloneMode() || isLegacyStandalone()
   );
 }
 
-function readFileAsArrayBuffer(file) {
-  return new Promise(function (resolve, reject) {
-    if (!file) {
-      reject(new Error('No se recibió archivo.'));
-      return;
-    }
-
-    const reader = new FileReader();
-
-    reader.onload = function () {
-      resolve(reader.result);
-    };
-
-    reader.onerror = function () {
-      reject(new Error('No se pudo leer el archivo PDF.'));
-    };
-
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-async function loadPdfDocument(file) {
+async function extractLinesFromPdf(file) {
   const arrayBuffer = await readFileAsArrayBuffer(file);
-
-  if (!arrayBuffer) {
-    throw new Error('No se pudo obtener el contenido binario del PDF.');
-  }
-
-  // Usar Uint8Array ayuda a evitar algunos problemas de transferencia en iOS.
-  const data =
-    arrayBuffer instanceof Uint8Array
-      ? arrayBuffer
-      : new Uint8Array(arrayBuffer);
-
-  const disableWorker = shouldDisablePdfWorker();
+  const data = new Uint8Array(arrayBuffer);
 
   const loadingTask = pdfjsLib.getDocument({
     data,
-    disableWorker,
+    disableWorker: shouldDisableWorker(),
     isEvalSupported: false,
     useSystemFonts: true,
-    stopAtErrors: false,
     disableRange: true,
     disableStream: true,
     disableAutoFetch: true,
-    verbosity: 0,
+    stopAtErrors: false,
   });
 
-  try {
-    const pdf = await loadingTask.promise;
-    return { pdf, loadingTask };
-  } catch (error) {
-    try {
-      loadingTask.destroy();
-    } catch {
-      // no-op
-    }
+  let pdf;
 
+  try {
+    pdf = await loadingTask.promise;
+  } catch (error) {
     const message =
       error instanceof Error && error.message
         ? error.message
-        : String(error || '');
+        : 'No se pudo abrir el PDF.';
 
     if (
-      /transfer/i.test(message) ||
       /worker/i.test(message) ||
       /arraybuffer/i.test(message) ||
       /webkit/i.test(message) ||
       /safari/i.test(message) ||
-      /unsupported/i.test(message) ||
-      /setting up fake worker/i.test(message)
+      /unsupported/i.test(message)
     ) {
       throw new Error(
-        'El iPhone pudo seleccionar el archivo, pero falló al procesar el PDF. Abre esta misma página en Safari normal o usa otro navegador/dispositivo.'
+        'El iPhone pudo seleccionar el archivo, pero falló al procesar el PDF. Abre esta misma página en Safari normal o usa otro dispositivo.'
       );
     }
 
-    throw new Error(
-      'No se pudo abrir el PDF en este dispositivo. Intenta con Safari normal o con otro dispositivo.'
-    );
+    throw new Error(message);
   }
-}
-
-async function extractLinesFromPdf(file) {
-  const { pdf, loadingTask } = await loadPdfDocument(file);
 
   try {
     const pages = [];
@@ -366,9 +323,8 @@ async function extractLinesFromPdf(file) {
         const item = textContent.items[i];
         if (!item || !item.str || !String(item.str).trim()) continue;
 
-        const transform = Array.isArray(item.transform) ? item.transform : [];
-        const x = Number(transform[4] || 0);
-        const y = Math.round(Number(transform[5] || 0));
+        const x = item.transform?.[4] ?? 0;
+        const y = Math.round(item.transform?.[5] ?? 0);
 
         if (!rowsMap.has(y)) {
           rowsMap.set(y, []);
@@ -407,9 +363,23 @@ async function extractLinesFromPdf(file) {
     try {
       await loadingTask.destroy();
     } catch {
-      // no-op
+      // noop
     }
   }
+}
+
+function buildCategoryKey(category) {
+  return [
+    category && category.supplierCode ? category.supplierCode : '',
+    category && category.categoryCode ? category.categoryCode : '',
+    category && category.categoryName ? category.categoryName : '',
+  ].join('::');
+}
+
+function computeItemStatus(quantity, noDisponible) {
+  if (quantity <= 0) return 'FALTANTE';
+  if (noDisponible > 0) return 'ALERTA';
+  return 'OK';
 }
 
 export async function parseInventoryPdf(file) {
@@ -451,13 +421,10 @@ export async function parseInventoryPdf(file) {
       const rawLine = allLines[i];
       const line = cleanLine(rawLine);
 
-      if (!line || isDecorativeLine(line)) {
-        continue;
-      }
+      if (!line || isDecorativeLine(line)) continue;
 
       if (isCategoryHeader(line)) {
         currentCategory = parseCategoryHeader(line);
-
         const categoryKey = buildCategoryKey(currentCategory);
 
         if (!categoriesMap.has(categoryKey)) {
@@ -476,15 +443,11 @@ export async function parseInventoryPdf(file) {
         continue;
       }
 
-      if (isTotalLine(line)) {
-        continue;
-      }
+      if (isTotalLine(line)) continue;
 
       const parsedProduct = parseProductLine(line);
 
-      if (!parsedProduct || !currentCategory) {
-        continue;
-      }
+      if (!parsedProduct || !currentCategory) continue;
 
       const categoryKey = buildCategoryKey(currentCategory);
       const categoryRef = categoriesMap.get(categoryKey);
