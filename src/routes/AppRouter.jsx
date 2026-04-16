@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from '../components/ProtectedRoute';
 import AppLayout from '../layouts/AppLayout';
 import HomePage from '../pages/HomePage';
@@ -18,22 +18,32 @@ export default function AppRouter() {
 
         {/* Rutas protegidas */}
         <Route
+          path="/"
           element={
             <ProtectedRoute>
               <AppLayout />
             </ProtectedRoute>
           }
         >
+          {/* Inicio */}
           <Route index element={<HomePage />} />
-          <Route path="/" element={<HomePage />} />
-          <Route path="/inventario-diario" element={<InventoryDayPage />} />
-          <Route path="/inventario/:id" element={<InventoryDetailPage />} />
+
+          {/* Redirección opcional si alguien entra a /home */}
+          <Route path="home" element={<Navigate to="/" replace />} />
+
+          {/* Inventario */}
+          <Route path="inventario-diario" element={<InventoryDayPage />} />
+          <Route path="inventario/:id" element={<InventoryDetailPage />} />
           <Route
-            path="/inventario/:id/editar"
+            path="inventario/:id/editar"
             element={<InventoryDetailPage />}
           />
-          <Route path="/historial" element={<InventoryHistoryPage />} />
-          <Route path="/productos" element={<ProductsPage />} />
+
+          {/* Historial */}
+          <Route path="historial" element={<InventoryHistoryPage />} />
+
+          {/* Productos */}
+          <Route path="productos" element={<ProductsPage />} />
         </Route>
 
         {/* Ruta no encontrada */}
