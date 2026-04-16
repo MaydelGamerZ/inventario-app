@@ -1,5 +1,8 @@
-import * as pdfjsLib from 'pdfjs-dist';
-import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import * as pdfjsLib from 'pdfjs-dist/build/pdf';
+
+// worker
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
 // Mantén el worker local para navegadores normales.
 // En Apple móvil/PWA lo desactivaremos al cargar el PDF.
