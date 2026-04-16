@@ -11,10 +11,10 @@ import {
   Download,
   Loader2,
   CheckCircle2,
-  FolderOpen,
   Bell,
   Play,
   Pencil,
+  Upload,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { parseInventoryPdf } from '../services/pdfInventoryParser';
@@ -60,7 +60,8 @@ function summarizeEntries(entries = []) {
   const summary = {};
 
   for (const entry of Array.isArray(entries) ? entries : []) {
-    const label = String(entry?.observationType || 'Buen estado').trim() || 'Buen estado';
+    const label =
+      String(entry?.observationType || 'Buen estado').trim() || 'Buen estado';
     summary[label] = (summary[label] || 0) + safeNumber(entry?.quantity);
   }
 
@@ -69,6 +70,7 @@ function summarizeEntries(entries = []) {
 
 function getCountedQuantity(item) {
   const entries = Array.isArray(item?.countEntries) ? item.countEntries : [];
+
   if (entries.length > 0) {
     return entries.reduce((sum, entry) => sum + safeNumber(entry?.quantity), 0);
   }
@@ -139,22 +141,29 @@ function getTagClasses(label) {
 
 function getInventoryStatusLabel(inventory) {
   if (!inventory) return 'Pendiente';
-
-  if (inventory.status === 'GUARDADO') {
-    return 'Guardado';
-  }
-
-  if (inventory.countingStarted) {
-    return 'Conteo en proceso';
-  }
-
+  if (inventory.status === 'GUARDADO') return 'Guardado';
+  if (inventory.countingStarted) return 'Conteo en proceso';
   return 'Cargado';
+}
+
+function isIosStandalone() {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+
+  const standalone =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(display-mode: standalone)').matches;
+
+  const legacyStandalone =
+    typeof navigator.standalone === 'boolean' ? navigator.standalone : false;
+
+  return Boolean(standalone || legacyStandalone);
 }
 
 export default function InventoryDayPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const fileInputRef = useRef(null);
   const previousStatusRef = useRef('');
 
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
@@ -173,6 +182,7 @@ export default function InventoryDayPage() {
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
   const [saveNotice, setSaveNotice] = useState('');
+  const [iosUploadHelp, setIosUploadHelp] = useState(false);
 
   useEffect(() => {
     setLoadingToday(true);
@@ -226,7 +236,9 @@ export default function InventoryDayPage() {
     if (!term) return items;
 
     return items.filter((item) => {
-      const observationLabels = Object.keys(summarizeEntries(item?.countEntries || []))
+      const observationLabels = Object.keys(
+        summarizeEntries(item?.countEntries || [])
+      )
         .join(' ')
         .toLowerCase();
 
@@ -264,25 +276,20 @@ export default function InventoryDayPage() {
   const isDraft = todayInventory?.status === 'BORRADOR';
   const hasInventory = !!todayInventory;
   const isCountStarted = Boolean(todayInventory?.countingStarted);
+  const showIosStandaloneHelp = isIosStandalone();
 
-  const openFilePicker = () => {
-    fileInputRef.current?.click();
+  const resetMessages = () => {
+    setError('');
+    setSuccess('');
+    setSaveNotice('');
   };
 
   const handleFileChange = async (event) => {
     const selectedFile = event.target.files?.[0];
     if (!selectedFile) return;
 
-    setError('');
-    setSuccess('');
-    setSaveNotice('');
-
-    if (selectedFile.type !== 'application/pdf') {
-      setError('El archivo seleccionado no es un PDF válido.');
-      event.target.value = '';
-      return;
-    }
-
+    resetMessages();
+    setIosUploadHelp(false);
     setUploading(true);
 
     try {
@@ -293,20 +300,45 @@ export default function InventoryDayPage() {
       }
 
       if (parsed.dateKey !== todayDateKey) {
-        setError(
+        throw new Error(
           `La fecha del PDF (${parsed.dateLabel || 'desconocida'}) no coincide con la fecha actual (${todayLabel}).`
         );
-        return;
       }
 
       await saveDailyInventoryFromPdf(parsed, user?.email || '');
       setSuccess(`Inventario del ${parsed.dateLabel} cargado correctamente.`);
     } catch (err) {
       console.error(err);
-      setError(err?.message || 'No se pudo procesar el PDF.');
+
+      const rawMessage =
+        typeof err?.message === 'string'
+          ? err.message
+          : 'No se pudo procesar el PDF en este dispositivo.';
+
+      if (
+        /undefined is not a function/i.test(rawMessage) ||
+        /not a function/i.test(rawMessage)
+      ) {
+        setError(
+          'Este navegador móvil tuvo un problema al leer el PDF. Intenta abrir la app en Safari normal o en Chrome actualizado, o vuelve a seleccionar el archivo.'
+        );
+      } else {
+        setError(rawMessage);
+      }
     } finally {
       setUploading(false);
-      event.target.value = '';
+
+      if (event.target) {
+        event.target.value = '';
+      }
+    }
+  };
+
+  const handleInputPointerDown = () => {
+    resetMessages();
+
+    if (showIosStandaloneHelp) {
+      setIosUploadHelp(true);
     }
   };
 
@@ -315,9 +347,7 @@ export default function InventoryDayPage() {
 
     try {
       setStartingCount(true);
-      setError('');
-      setSuccess('');
-      setSaveNotice('');
+      resetMessages();
 
       await startInventoryCount(todayInventory.id);
       navigate(`/inventario/${todayInventory.id}/editar`);
@@ -331,32 +361,26 @@ export default function InventoryDayPage() {
 
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="application/pdf"
-        className="hidden"
-        onChange={handleFileChange}
-      />
-
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
             <h1 className="text-3xl font-bold text-white sm:text-4xl">
               Inventario Diario
             </h1>
+
             <p className="mt-2 text-sm leading-7 text-zinc-400 sm:text-base">
               Sube el PDF del día y el sistema agregará automáticamente fecha,
               semana, cedis, categorías y productos. El conteo real comienza al
-              presionar <span className="text-white font-medium">Iniciar conteo</span>.
+              presionar{' '}
+              <span className="font-medium text-white">Iniciar conteo</span>.
             </p>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <button
-              onClick={openFilePicker}
-              disabled={uploading}
-              className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:min-w-[320px]">
+            <label
+              className={`relative inline-flex min-h-[52px] cursor-pointer items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 ${
+                uploading ? 'pointer-events-none opacity-60' : ''
+              }`}
             >
               {uploading ? (
                 <Loader2 size={18} className="animate-spin" />
@@ -364,19 +388,44 @@ export default function InventoryDayPage() {
                 <FileUp size={18} />
               )}
               {uploading ? 'Procesando PDF...' : 'Subir PDF del día'}
-            </button>
 
-            <button
-              onClick={openFilePicker}
-              disabled={uploading}
-              className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-5 py-3 font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={handleFileChange}
+                onPointerDown={handleInputPointerDown}
+                onTouchStart={handleInputPointerDown}
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              />
+            </label>
+
+            <label
+              className={`relative inline-flex min-h-[52px] cursor-pointer items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-5 py-3 font-semibold text-white transition hover:bg-zinc-800 ${
+                uploading ? 'pointer-events-none opacity-60' : ''
+              }`}
             >
-              <FolderOpen size={18} />
+              <Upload size={18} />
               Elegir archivo
-            </button>
+
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={handleFileChange}
+                onPointerDown={handleInputPointerDown}
+                onTouchStart={handleInputPointerDown}
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              />
+            </label>
           </div>
         </div>
       </section>
+
+      {showIosStandaloneHelp && iosUploadHelp && (
+        <section className="rounded-2xl border border-yellow-900/60 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-100">
+          En iPhone como app web, el selector de archivos puede fallar según iOS.
+          Si no abre, prueba abrir esta misma página en Safari o Chrome normal.
+        </section>
+      )}
 
       {error && (
         <section className="rounded-2xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
@@ -427,7 +476,9 @@ export default function InventoryDayPage() {
             <div className="min-w-0">
               <p className="text-sm text-zinc-400">Inventario de hoy</p>
               <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
-                {loadingToday ? 'Cargando...' : getInventoryStatusLabel(todayInventory)}
+                {loadingToday
+                  ? 'Cargando...'
+                  : getInventoryStatusLabel(todayInventory)}
               </h2>
             </div>
           </div>
@@ -471,8 +522,9 @@ export default function InventoryDayPage() {
               Inventario activo del día
             </h2>
             <p className="mt-1 text-sm text-zinc-400">
-              Mientras siga en borrador, los conteos pueden reflejarse en tiempo real entre usuarios.
-              Solo al guardar final aparecerá en historial y se podrá descargar.
+              Mientras siga en borrador, los conteos pueden reflejarse en tiempo
+              real entre usuarios. Solo al guardar final aparecerá en historial
+              y se podrá descargar.
             </p>
           </div>
 
@@ -651,7 +703,10 @@ export default function InventoryDayPage() {
                                     tag.label
                                   )}`}
                                 >
-                                  {tag.label} · {safeNumber(tag.quantity).toLocaleString('es-MX')}
+                                  {tag.label} ·{' '}
+                                  {safeNumber(tag.quantity).toLocaleString(
+                                    'es-MX'
+                                  )}
                                 </span>
                               ))}
                             </div>
@@ -690,7 +745,9 @@ export default function InventoryDayPage() {
                             No disponible
                           </span>
                           <span className="text-zinc-200">
-                            {safeNumber(item.unavailableQuantity).toLocaleString('es-MX')}
+                            {safeNumber(
+                              item.unavailableQuantity
+                            ).toLocaleString('es-MX')}
                           </span>
                         </div>
 
@@ -708,7 +765,9 @@ export default function InventoryDayPage() {
                             Sobra
                           </span>
                           <span className="text-emerald-300">
-                            {difference > 0 ? difference.toLocaleString('es-MX') : '0'}
+                            {difference > 0
+                              ? difference.toLocaleString('es-MX')
+                              : '0'}
                           </span>
                         </div>
 
@@ -717,7 +776,9 @@ export default function InventoryDayPage() {
                             Falta
                           </span>
                           <span className="text-red-300">
-                            {difference < 0 ? Math.abs(difference).toLocaleString('es-MX') : '0'}
+                            {difference < 0
+                              ? Math.abs(difference).toLocaleString('es-MX')
+                              : '0'}
                           </span>
                         </div>
                       </div>
@@ -729,7 +790,8 @@ export default function InventoryDayPage() {
 
             {filteredItems.length > 80 && (
               <p className="text-sm text-zinc-500">
-                Se muestran los primeros 80 resultados. Usa la búsqueda para filtrar más.
+                Se muestran los primeros 80 resultados. Usa la búsqueda para
+                filtrar más.
               </p>
             )}
           </div>
@@ -808,10 +870,14 @@ export default function InventoryDayPage() {
 
       <section className="rounded-3xl border border-yellow-900/60 bg-yellow-950/20 p-5">
         <div className="flex gap-3">
-          <AlertTriangle className="mt-0.5 shrink-0 text-yellow-400" size={20} />
+          <AlertTriangle
+            className="mt-0.5 shrink-0 text-yellow-400"
+            size={20}
+          />
           <div className="text-sm leading-7 text-yellow-100">
-            Mientras el inventario esté en borrador, los usuarios pueden seguir contando y ver cambios en tiempo real.
-            Solo al guardar final pasará al historial y quedará listo para descargar.
+            Mientras el inventario esté en borrador, los usuarios pueden seguir
+            contando y ver cambios en tiempo real. Solo al guardar final pasará
+            al historial y quedará listo para descargar.
           </div>
         </div>
       </section>

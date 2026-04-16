@@ -128,7 +128,7 @@ function normalizeInventoryItem(item) {
   };
 
   normalized.status =
-    safeString(item?.status) || calculateItemStatus(normalized);
+    calculateItemStatus(normalized) || safeString(item?.status) || 'OK';
 
   return normalized;
 }
@@ -348,6 +348,8 @@ export async function startInventoryCount(inventoryId) {
     status: 'BORRADOR',
     countingStarted: true,
     countingFinished: false,
+    finalizedAt: null,
+    finalizedByEmail: '',
   });
 
   return await getInventoryById(inventoryId);
@@ -463,7 +465,8 @@ export async function removeInventoryCountEntry(
 }
 
 /**
- * Guarda detalle completo en BORRADOR.
+ * Guarda notas o estructura en BORRADOR.
+ * No lo manda al historial.
  */
 export async function saveInventoryDetailDraft(inventoryId, items, notes = '') {
   const currentInventory = await getInventoryById(inventoryId);
@@ -528,18 +531,25 @@ export function subscribeAllInventories(callback, options = {}) {
   const includeDrafts = Boolean(options.includeDrafts);
   const q = query(inventoriesRef, orderBy('dateKey', 'desc'));
 
-  return onSnapshot(q, (snapshot) => {
-    let inventories = snapshot.docs.map((docItem) => ({
-      id: docItem.id,
-      ...docItem.data(),
-    }));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      let inventories = snapshot.docs.map((docItem) => ({
+        id: docItem.id,
+        ...docItem.data(),
+      }));
 
-    if (!includeDrafts) {
-      inventories = inventories.filter((inv) => isFinalStatus(inv.status));
+      if (!includeDrafts) {
+        inventories = inventories.filter((inv) => isFinalStatus(inv.status));
+      }
+
+      callback(inventories);
+    },
+    (error) => {
+      console.error('Error en subscribeAllInventories:', error);
+      callback([]);
     }
-
-    callback(inventories);
-  });
+  );
 }
 
 export function subscribeInventoryById(inventoryId, callback) {
@@ -552,17 +562,24 @@ export function subscribeInventoryById(inventoryId, callback) {
 
   const ref = doc(db, 'inventories', normalizedId);
 
-  return onSnapshot(ref, (snapshot) => {
-    if (!snapshot.exists()) {
-      callback(null);
-      return;
-    }
+  return onSnapshot(
+    ref,
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        callback(null);
+        return;
+      }
 
-    callback({
-      id: snapshot.id,
-      ...snapshot.data(),
-    });
-  });
+      callback({
+        id: snapshot.id,
+        ...snapshot.data(),
+      });
+    },
+    (error) => {
+      console.error('Error en subscribeInventoryById:', error);
+      callback(null);
+    }
+  );
 }
 
 export function subscribeInventoryByDate(dateKey, callback) {
@@ -579,19 +596,26 @@ export function subscribeInventoryByDate(dateKey, callback) {
     limit(1)
   );
 
-  return onSnapshot(q, (snapshot) => {
-    if (snapshot.empty) {
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      if (snapshot.empty) {
+        callback(null);
+        return;
+      }
+
+      const docSnapshot = snapshot.docs[0];
+
+      callback({
+        id: docSnapshot.id,
+        ...docSnapshot.data(),
+      });
+    },
+    (error) => {
+      console.error('Error en subscribeInventoryByDate:', error);
       callback(null);
-      return;
     }
-
-    const docSnapshot = snapshot.docs[0];
-
-    callback({
-      id: docSnapshot.id,
-      ...docSnapshot.data(),
-    });
-  });
+  );
 }
 
 /* =========================

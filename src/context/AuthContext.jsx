@@ -1,4 +1,11 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -11,19 +18,64 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser || null);
-      setLoadingAuth(false);
-    });
+    mountedRef.current = true;
 
-    return () => unsubscribe();
+    let resolved = false;
+
+    const safetyTimer = setTimeout(() => {
+      if (!mountedRef.current || resolved) return;
+
+      resolved = true;
+      setAuthReady(true);
+      setLoadingAuth(false);
+    }, 7000);
+
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      (currentUser) => {
+        if (!mountedRef.current || resolved) return;
+
+        resolved = true;
+        clearTimeout(safetyTimer);
+
+        setUser(currentUser || null);
+        setAuthReady(true);
+        setLoadingAuth(false);
+      },
+      (error) => {
+        console.error('Error al verificar sesión:', error);
+
+        if (!mountedRef.current || resolved) return;
+
+        resolved = true;
+        clearTimeout(safetyTimer);
+
+        setUser(null);
+        setAuthReady(true);
+        setLoadingAuth(false);
+      }
+    );
+
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(safetyTimer);
+      unsubscribe?.();
+    };
   }, []);
 
   const login = async (email, password) => {
-    const cleanEmail = email.trim();
-    return await signInWithEmailAndPassword(auth, cleanEmail, password);
+    const cleanEmail = String(email || '').trim();
+    const cleanPassword = String(password || '');
+
+    if (!cleanEmail || !cleanPassword) {
+      throw new Error('Correo y contraseña son obligatorios.');
+    }
+
+    return await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
   };
 
   const logout = async () => {
@@ -34,11 +86,12 @@ export function AuthProvider({ children }) {
     () => ({
       user,
       loadingAuth,
+      authReady,
       isAuthenticated: !!user,
       login,
       logout,
     }),
-    [user, loadingAuth]
+    [user, loadingAuth, authReady]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

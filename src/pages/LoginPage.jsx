@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext.jsx';
  * - Optimizada para móvil/iPhone y escritorio.
  */
 export default function LoginPage() {
-  const { user, loadingAuth } = useAuth();
+  const { user, loadingAuth, authReady } = useAuth();
 
   const [form, setForm] = useState({
     email: '',
@@ -33,8 +33,8 @@ export default function LoginPage() {
     e.preventDefault();
     setErrorMessage('');
 
-    const email = form.email.trim();
-    const password = form.password;
+    const email = String(form.email || '').trim();
+    const password = String(form.password || '');
 
     if (!email || !password.trim()) {
       setErrorMessage('Completa correo y contraseña.');
@@ -46,13 +46,26 @@ export default function LoginPage() {
       await loginWithEmail(email, password);
     } catch (error) {
       console.error(error);
-      setErrorMessage('Correo o contraseña incorrectos.');
+
+      const message = String(error?.message || '').toLowerCase();
+
+      if (
+        message.includes('network') ||
+        message.includes('fetch') ||
+        message.includes('timeout')
+      ) {
+        setErrorMessage(
+          'No se pudo conectar en este momento. Revisa tu internet e intenta otra vez.'
+        );
+      } else {
+        setErrorMessage('Correo o contraseña incorrectos.');
+      }
     } finally {
       setLoadingEmail(false);
     }
   }
 
-  if (loadingAuth) {
+  if (loadingAuth && !authReady) {
     return (
       <div
         className="
@@ -86,7 +99,6 @@ export default function LoginPage() {
       "
     >
       <div className="w-full max-w-md overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900 shadow-2xl">
-        {/* Encabezado */}
         <div className="border-b border-zinc-800 px-6 py-6 sm:px-8 sm:py-8">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600/15 text-blue-400">
             <LockKeyhole size={26} />
@@ -101,7 +113,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Formulario */}
         <div className="px-6 py-6 sm:px-8 sm:py-8">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -120,6 +131,9 @@ export default function LoginPage() {
                   type="email"
                   inputMode="email"
                   autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={form.email}
                   onChange={handleChange}
                   placeholder="ejemplo@correo.com"
