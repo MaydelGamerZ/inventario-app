@@ -19,13 +19,15 @@ const MONTHS_ES = {
   diciembre: '12',
 };
 
-function normalizeSpaces(value = '') {
-  return String(value).replace(/\s+/g, ' ').trim();
+function normalizeSpaces(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function cleanLine(value = '') {
+function cleanLine(value) {
   return normalizeSpaces(
-    String(value)
+    String(value || '')
       .replace(/[_]+/g, ' ')
       .replace(/[|]+/g, ' ')
       .replace(/[•]+/g, ' ')
@@ -35,7 +37,7 @@ function cleanLine(value = '') {
   );
 }
 
-function normalizeForCompare(value = '') {
+function normalizeForCompare(value) {
   return cleanLine(value)
     .toLowerCase()
     .normalize('NFD')
@@ -51,6 +53,19 @@ function parseNumber(value) {
 
   const parsed = Number(normalized);
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function flattenPages(pages) {
+  const result = [];
+
+  for (let i = 0; i < pages.length; i += 1) {
+    const page = Array.isArray(pages[i]) ? pages[i] : [];
+    for (let j = 0; j < page.length; j += 1) {
+      result.push(page[j]);
+    }
+  }
+
+  return result;
 }
 
 function parseSpanishDateToKey(dateLabel) {
@@ -78,23 +93,22 @@ function isDecorativeLine(line) {
   if (!normalized) return true;
 
   return (
-    normalized.startsWith('producto') ||
-    normalized.startsWith('cantidad') ||
-    normalized.startsWith('no disponible') ||
-    normalized.startsWith('no disp') ||
-    normalized.startsWith('conteo fisico') ||
-    normalized.startsWith('total diferencia') ||
-    normalized.startsWith('observacion') ||
-    normalized.startsWith('distribuciones a detalle') ||
-    normalized.startsWith('informe de inventario diario') ||
-    /^hoja \d+ de \d+$/.test(normalized) ||
+    normalized.indexOf('producto') === 0 ||
+    normalized.indexOf('cantidad') === 0 ||
+    normalized.indexOf('no disponible') === 0 ||
+    normalized.indexOf('no disponib') === 0 ||
+    normalized.indexOf('conteo fisico') === 0 ||
+    normalized.indexOf('total diferencia') === 0 ||
+    normalized.indexOf('observacion') === 0 ||
+    normalized.indexOf('distribuciones a detalle') === 0 ||
+    normalized.indexOf('informe de inventario diario') === 0 ||
+    /^hoja \d+ de \d+$/i.test(normalized) ||
     /^-+$/.test(normalized)
   );
 }
 
 function isCategoryHeader(line) {
   const cleaned = cleanLine(line);
-
   return /^\d{2}\s*-\s*.+?\s*-\s*\d+\s*-\s*.+$/i.test(cleaned);
 }
 
@@ -102,9 +116,9 @@ function isTotalLine(line) {
   const normalized = normalizeForCompare(line);
 
   return (
-    normalized.startsWith('total.-') ||
-    normalized.startsWith('total general.-') ||
-    normalized.startsWith('total general')
+    normalized.indexOf('total.-') === 0 ||
+    normalized.indexOf('total general.-') === 0 ||
+    normalized.indexOf('total general') === 0
   );
 }
 
@@ -140,7 +154,6 @@ function parseProductLine(line) {
   if (isCategoryHeader(cleaned)) return null;
   if (isTotalLine(cleaned)) return null;
 
-  // Busca dos números al final: cantidad y no disponible
   const match = cleaned.match(/^(.*?)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)$/);
 
   if (!match) return null;
@@ -152,9 +165,9 @@ function parseProductLine(line) {
   if (!productName) return null;
 
   return {
-    productName,
-    quantity,
-    noDisponible,
+    productName: productName,
+    quantity: quantity,
+    noDisponible: noDisponible,
   };
 }
 
@@ -180,8 +193,8 @@ function extractMetaFromText(fullText) {
 
   return {
     week: weekMatch ? normalizeSpaces(weekMatch[1]) : '',
-    dateLabel,
-    dateKey,
+    dateLabel: dateLabel,
+    dateKey: dateKey,
     cedis: cedisMatch ? normalizeSpaces(cedisMatch[1]) : '',
     totalGeneral: totalGeneralMatch ? parseNumber(totalGeneralMatch[1]) : 0,
     totalGeneralNoDisponible: totalGeneralMatch
@@ -203,8 +216,9 @@ async function extractLinesFromPdf(file) {
 
     const rowsMap = new Map();
 
-    for (const item of textContent.items) {
-      if (!item?.str || !String(item.str).trim()) continue;
+    for (let i = 0; i < textContent.items.length; i += 1) {
+      const item = textContent.items[i];
+      if (!item || !item.str || !String(item.str).trim()) continue;
 
       const x = item.transform[4];
       const y = Math.round(item.transform[5]);
@@ -214,19 +228,27 @@ async function extractLinesFromPdf(file) {
       }
 
       rowsMap.get(y).push({
-        x,
+        x: x,
         text: item.str,
       });
     }
 
     const rows = Array.from(rowsMap.entries())
-      .sort((a, b) => b[0] - a[0])
-      .map(([, rowItems]) =>
-        rowItems
-          .sort((a, b) => a.x - b.x)
-          .map((entry) => entry.text)
-          .join(' ')
-      )
+      .sort(function (a, b) {
+        return b[0] - a[0];
+      })
+      .map(function (entry) {
+        const rowItems = entry[1];
+
+        return rowItems
+          .sort(function (a, b) {
+            return a.x - b.x;
+          })
+          .map(function (part) {
+            return part.text;
+          })
+          .join(' ');
+      })
       .map(cleanLine)
       .filter(Boolean);
 
@@ -238,9 +260,9 @@ async function extractLinesFromPdf(file) {
 
 function buildCategoryKey(category) {
   return [
-    category?.supplierCode || '',
-    category?.categoryCode || '',
-    category?.categoryName || '',
+    category && category.supplierCode ? category.supplierCode : '',
+    category && category.categoryCode ? category.categoryCode : '',
+    category && category.categoryName ? category.categoryName : '',
   ].join('::');
 }
 
@@ -255,12 +277,19 @@ export async function parseInventoryPdf(file) {
     throw new Error('No se recibió ningún archivo PDF.');
   }
 
-  if (file.type && file.type !== 'application/pdf') {
+  const fileName = String(file.name || '').toLowerCase();
+  const fileType = String(file.type || '').toLowerCase();
+
+  if (
+    fileType &&
+    fileType !== 'application/pdf' &&
+    fileName.slice(-4) !== '.pdf'
+  ) {
     throw new Error('El archivo seleccionado no es un PDF válido.');
   }
 
   const pages = await extractLinesFromPdf(file);
-  const allLines = pages.flat();
+  const allLines = flattenPages(pages);
   const fullText = allLines.join('\n');
 
   const meta = extractMetaFromText(fullText);
@@ -277,7 +306,8 @@ export async function parseInventoryPdf(file) {
   const categoriesMap = new Map();
   const items = [];
 
-  for (const rawLine of allLines) {
+  for (let i = 0; i < allLines.length; i += 1) {
+    const rawLine = allLines[i];
     const line = cleanLine(rawLine);
 
     if (!line || isDecorativeLine(line)) {
@@ -337,7 +367,7 @@ export async function parseInventoryPdf(file) {
       difference: '',
       observation: '',
       countEntries: [],
-      status,
+      status: status,
     };
 
     items.push(item);
@@ -353,11 +383,11 @@ export async function parseInventoryPdf(file) {
     throw new Error('No se detectaron productos válidos dentro del PDF.');
   }
 
-  const categories = Array.from(categoriesMap.values()).sort((a, b) =>
-    a.categoryName.localeCompare(b.categoryName, 'es', {
+  const categories = Array.from(categoriesMap.values()).sort(function (a, b) {
+    return a.categoryName.localeCompare(b.categoryName, 'es', {
       sensitivity: 'base',
-    })
-  );
+    });
+  });
 
   return {
     sourceFileName: file.name,
@@ -367,7 +397,7 @@ export async function parseInventoryPdf(file) {
     cedis: meta.cedis,
     totalGeneral: meta.totalGeneral,
     totalGeneralNoDisponible: meta.totalGeneralNoDisponible,
-    categories,
-    items,
+    categories: categories,
+    items: items,
   };
 }
