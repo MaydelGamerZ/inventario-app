@@ -10,17 +10,27 @@ import {
   Loader2,
   Package,
   Pencil,
+  Save,
   Search,
+  Trash2,
+  Plus,
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import {
+  addInventoryCountEntry,
+  finalizeInventoryCount,
+  removeInventoryCountEntry,
   subscribeInventoryById,
-  exportInventoryToPDF,
 } from '../services/inventory';
-import { exportInventoryToPDF as exportInventoryPdfFile } from '../services/pdfExporter';
+import { exportInventoryToPDF } from '../services/pdfExporter';
 
 function safeNumber(value) {
   const parsed = Number(value);
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function safeString(value) {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function summarizeEntries(entries = []) {
@@ -122,10 +132,46 @@ function getStatusClasses(status) {
   }
 }
 
+function cleanCedisDisplay(value) {
+  const text = safeString(value);
+  if (!text) return 'Sin cedis';
+
+  const stopWords = [
+    ' PRODUCTO',
+    ' CANTIDAD',
+    ' NO CONTEO',
+    ' CONTEO FISICO',
+    ' TOTAL',
+    ' DIFERENCIA',
+    ' OBSERVACIÓN',
+    ' OBSERVACION',
+  ];
+
+  let cleaned = text;
+
+  for (const word of stopWords) {
+    const index = cleaned.indexOf(word);
+    if (index > 0) {
+      cleaned = cleaned.slice(0, index).trim();
+    }
+  }
+
+  return cleaned || text;
+}
+
+function buildInitialDraft() {
+  return {
+    quantity: '',
+    observationType: 'Buen estado',
+    comment: '',
+  };
+}
+
 export default function InventoryDetailPage() {
   const { id } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const isEditMode = location.pathname.endsWith('/editar');
 
@@ -133,6 +179,12 @@ export default function InventoryDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [savingFinal, setSavingFinal] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [actionSuccess, setActionSuccess] = useState('');
+  const [drafts, setDrafts] = useState({});
+  const [busyAdd, setBusyAdd] = useState({});
+  const [busyDelete, setBusyDelete] = useState({});
 
   useEffect(() => {
     if (!id) {
@@ -195,14 +247,123 @@ export default function InventoryDetailPage() {
         .toLowerCase();
 
       return (
-        String(item?.productName || '').toLowerCase().includes(term) ||
-        String(item?.categoryName || '').toLowerCase().includes(term) ||
-        String(item?.supplierName || '').toLowerCase().includes(term) ||
-        String(item?.status || '').toLowerCase().includes(term) ||
+        String(item?.productName || '')
+          .toLowerCase()
+          .includes(term) ||
+        String(item?.categoryName || '')
+          .toLowerCase()
+          .includes(term) ||
+        String(item?.supplierName || '')
+          .toLowerCase()
+          .includes(term) ||
+        String(item?.status || '')
+          .toLowerCase()
+          .includes(term) ||
         observationLabels.includes(term)
       );
     });
   }, [inventory, search]);
+
+  function getDraft(index) {
+    return drafts[index] || buildInitialDraft();
+  }
+
+  function updateDraft(index, patch) {
+    setDrafts((prev) => ({
+      ...prev,
+      [index]: {
+        ...getDraft(index),
+        ...patch,
+      },
+    }));
+  }
+
+  async function handleAddEntry(itemIndex) {
+    if (!inventory?.id) return;
+
+    const draft = getDraft(itemIndex);
+    const quantity = safeNumber(draft.quantity);
+
+    setActionError('');
+    setActionSuccess('');
+
+    if (quantity <= 0) {
+      setActionError('La cantidad debe ser mayor a 0.');
+      return;
+    }
+
+    try {
+      setBusyAdd((prev) => ({ ...prev, [itemIndex]: true }));
+
+      await addInventoryCountEntry(
+        inventory.id,
+        itemIndex,
+        {
+          quantity,
+          observationType: draft.observationType || 'Buen estado',
+          comment: draft.comment || '',
+        },
+        user?.email || ''
+      );
+
+      setDrafts((prev) => ({
+        ...prev,
+        [itemIndex]: buildInitialDraft(),
+      }));
+
+      setActionSuccess('Conteo agregado correctamente.');
+    } catch (err) {
+      console.error(err);
+      setActionError(err?.message || 'No se pudo agregar el conteo.');
+    } finally {
+      setBusyAdd((prev) => ({ ...prev, [itemIndex]: false }));
+    }
+  }
+
+  async function handleDeleteEntry(itemIndex, entryId) {
+    if (!inventory?.id || !entryId) return;
+
+    setActionError('');
+    setActionSuccess('');
+
+    try {
+      setBusyDelete((prev) => ({ ...prev, [entryId]: true }));
+
+      await removeInventoryCountEntry(inventory.id, itemIndex, entryId);
+      setActionSuccess('Conteo eliminado correctamente.');
+    } catch (err) {
+      console.error(err);
+      setActionError(err?.message || 'No se pudo eliminar el conteo.');
+    } finally {
+      setBusyDelete((prev) => ({ ...prev, [entryId]: false }));
+    }
+  }
+
+  async function handleFinalize() {
+    if (!inventory?.id) return;
+
+    setActionError('');
+    setActionSuccess('');
+
+    try {
+      setSavingFinal(true);
+
+      await finalizeInventoryCount(
+        inventory.id,
+        inventory.items || [],
+        inventory.notes || '',
+        user?.email || ''
+      );
+
+      setActionSuccess('Inventario guardado de forma final.');
+      navigate(`/inventario/${inventory.id}`);
+    } catch (err) {
+      console.error(err);
+      setActionError(err?.message || 'No se pudo guardar el inventario.');
+    } finally {
+      setSavingFinal(false);
+    }
+  }
 
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -225,7 +386,7 @@ export default function InventoryDetailPage() {
 
               <p className="mt-2 text-sm leading-7 text-zinc-400 sm:text-base">
                 {isEditMode
-                  ? 'Aquí debes continuar el conteo del inventario seleccionado.'
+                  ? 'Aquí puedes capturar conteos, observaciones y guardar el inventario final.'
                   : 'Aquí puedes revisar el detalle completo del inventario seleccionado.'}
               </p>
             </div>
@@ -255,11 +416,27 @@ export default function InventoryDetailPage() {
             {inventory?.status === 'GUARDADO' && (
               <button
                 type="button"
-                onClick={() => exportInventoryPdfFile(inventory)}
+                onClick={() => exportInventoryToPDF(inventory)}
                 className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500"
               >
                 <Download size={18} />
                 Descargar
+              </button>
+            )}
+
+            {inventory && isEditMode && (
+              <button
+                type="button"
+                onClick={handleFinalize}
+                disabled={savingFinal}
+                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500 disabled:opacity-60"
+              >
+                {savingFinal ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Save size={18} />
+                )}
+                {savingFinal ? 'Guardando...' : 'Guardar final'}
               </button>
             )}
           </div>
@@ -281,11 +458,24 @@ export default function InventoryDetailPage() {
         </section>
       )}
 
+      {!loading && actionError && (
+        <section className="rounded-2xl border border-red-900/60 bg-red-950/40 px-4 py-4 text-sm text-red-300">
+          {actionError}
+        </section>
+      )}
+
+      {!loading && actionSuccess && (
+        <section className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 px-4 py-4 text-sm text-emerald-300">
+          {actionSuccess}
+        </section>
+      )}
+
       {!loading && inventory && (
         <>
           {isEditMode && (
             <section className="rounded-2xl border border-blue-900/60 bg-blue-950/30 px-4 py-4 text-sm text-blue-200">
-              Entraste correctamente a la ruta de edición del inventario.
+              Ya estás dentro de la ruta correcta de edición. Aquí sí puedes
+              contar.
             </section>
           )}
 
@@ -348,7 +538,7 @@ export default function InventoryDetailPage() {
           </section>
 
           <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
               <div className="rounded-2xl border border-zinc-800 bg-black p-4">
                 <p className="text-sm text-zinc-400">Semana</p>
                 <p className="mt-2 font-semibold text-white">
@@ -356,10 +546,10 @@ export default function InventoryDetailPage() {
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <div className="rounded-2xl border border-zinc-800 bg-black p-4 sm:col-span-2 xl:col-span-2">
                 <p className="text-sm text-zinc-400">Cedis</p>
                 <p className="mt-2 break-words font-semibold text-white">
-                  {inventory.cedis || 'Sin cedis'}
+                  {cleanCedisDisplay(inventory.cedis)}
                 </p>
               </div>
 
@@ -408,7 +598,7 @@ export default function InventoryDetailPage() {
               />
             </div>
 
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-4">
               {filteredItems.length === 0 ? (
                 <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
                   No hay productos que coincidan con la búsqueda.
@@ -419,6 +609,10 @@ export default function InventoryDetailPage() {
                   const expected = safeNumber(item.expectedQuantity);
                   const difference = counted - expected;
                   const tags = buildItemTags(item);
+                  const draft = getDraft(index);
+                  const entries = Array.isArray(item?.countEntries)
+                    ? item.countEntries
+                    : [];
 
                   return (
                     <div
@@ -519,6 +713,146 @@ export default function InventoryDetailPage() {
                           </span>
                         </div>
                       </div>
+
+                      {isEditMode && (
+                        <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                          <p className="mb-3 text-sm font-medium text-white">
+                            Agregar conteo
+                          </p>
+
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            <div>
+                              <label className="mb-1 block text-xs text-zinc-500">
+                                Cantidad
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={draft.quantity}
+                                onChange={(e) =>
+                                  updateDraft(index, {
+                                    quantity: e.target.value,
+                                  })
+                                }
+                                className="w-full rounded-xl border border-zinc-700 bg-black px-3 py-2 text-white outline-none focus:border-blue-500"
+                                placeholder="Ej. 20"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="mb-1 block text-xs text-zinc-500">
+                                Observación
+                              </label>
+                              <select
+                                value={draft.observationType}
+                                onChange={(e) =>
+                                  updateDraft(index, {
+                                    observationType: e.target.value,
+                                  })
+                                }
+                                className="w-full rounded-xl border border-zinc-700 bg-black px-3 py-2 text-white outline-none focus:border-blue-500"
+                              >
+                                <option>Buen estado</option>
+                                <option>Caducado</option>
+                                <option>Dañado</option>
+                                <option>Maltratado</option>
+                                <option>Exhibición</option>
+                              </select>
+                            </div>
+
+                            <div className="md:col-span-2 xl:col-span-2">
+                              <label className="mb-1 block text-xs text-zinc-500">
+                                Comentario
+                              </label>
+                              <input
+                                type="text"
+                                value={draft.comment}
+                                onChange={(e) =>
+                                  updateDraft(index, {
+                                    comment: e.target.value,
+                                  })
+                                }
+                                className="w-full rounded-xl border border-zinc-700 bg-black px-3 py-2 text-white outline-none focus:border-blue-500"
+                                placeholder="Opcional"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleAddEntry(index)}
+                              disabled={Boolean(busyAdd[index])}
+                              className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-500 disabled:opacity-60"
+                            >
+                              {busyAdd[index] ? (
+                                <Loader2 size={16} className="animate-spin" />
+                              ) : (
+                                <Plus size={16} />
+                              )}
+                              {busyAdd[index]
+                                ? 'Agregando...'
+                                : 'Agregar conteo'}
+                            </button>
+                          </div>
+
+                          <div className="mt-4 space-y-2">
+                            <p className="text-sm font-medium text-white">
+                              Conteos registrados
+                            </p>
+
+                            {entries.length === 0 ? (
+                              <div className="rounded-xl border border-dashed border-zinc-700 bg-black px-3 py-3 text-sm text-zinc-500">
+                                Aún no hay conteos para este producto.
+                              </div>
+                            ) : (
+                              entries.map((entry) => (
+                                <div
+                                  key={entry.id}
+                                  className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-black px-3 py-3 lg:flex-row lg:items-center lg:justify-between"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium text-white">
+                                      {safeNumber(
+                                        entry.quantity
+                                      ).toLocaleString('es-MX')}{' '}
+                                      · {entry.observationType || 'Buen estado'}
+                                    </p>
+
+                                    <p className="text-xs text-zinc-500">
+                                      {entry.comment || 'Sin comentario'}
+                                    </p>
+
+                                    <p className="text-xs text-zinc-600">
+                                      {entry.createdBy || 'Sin usuario'} ·{' '}
+                                      {entry.createdAt || 'Sin fecha'}
+                                    </p>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleDeleteEntry(index, entry.id)
+                                    }
+                                    disabled={Boolean(busyDelete[entry.id])}
+                                    className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-xl border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-950/60 disabled:opacity-60"
+                                  >
+                                    {busyDelete[entry.id] ? (
+                                      <Loader2
+                                        size={14}
+                                        className="animate-spin"
+                                      />
+                                    ) : (
+                                      <Trash2 size={14} />
+                                    )}
+                                    Eliminar
+                                  </button>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })

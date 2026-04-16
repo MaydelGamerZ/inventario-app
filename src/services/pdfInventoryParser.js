@@ -178,7 +178,61 @@ function parseProductLine(line) {
   };
 }
 
-function extractMetaFromText(fullText) {
+function extractSingleLineValue(allLines, label) {
+  const normalizedLabel = `${normalizeForCompare(label)}:`;
+
+  for (const rawLine of allLines) {
+    const line = cleanLine(rawLine);
+    const normalized = normalizeForCompare(line);
+
+    if (normalized.startsWith(normalizedLabel)) {
+      const colonIndex = line.indexOf(':');
+      if (colonIndex >= 0) {
+        return normalizeSpaces(line.slice(colonIndex + 1));
+      }
+    }
+  }
+
+  return '';
+}
+
+function cleanCedisValue(value) {
+  let text = normalizeSpaces(value);
+
+  if (!text) return '';
+
+  const stopTokens = [
+    ' PRODUCTO',
+    ' CANTIDAD',
+    ' NO DISPONIBLE',
+    ' NO DISPONIB',
+    ' CONTEO FISICO',
+    ' TOTAL',
+    ' DIFERENCIA',
+    ' OBSERVACIÓN',
+    ' OBSERVACION',
+    ' DISTRIBUCIONES A DETALLE',
+    ' INFORME DE INVENTARIO DIARIO',
+  ];
+
+  const upper = text.toUpperCase();
+  let cutIndex = -1;
+
+  for (const token of stopTokens) {
+    const idx = upper.indexOf(token);
+    if (idx > 0 && (cutIndex === -1 || idx < cutIndex)) {
+      cutIndex = idx;
+    }
+  }
+
+  if (cutIndex > 0) {
+    text = text.slice(0, cutIndex).trim();
+  }
+
+  return normalizeSpaces(text);
+}
+
+function extractMetaFromLines(allLines, fullText) {
   const normalized = normalizeSpaces(fullText);
 
   const weekMatch = normalized.match(/Semana:\s*(\d+)/i);
@@ -187,13 +241,13 @@ function extractMetaFromText(fullText) {
     /Fecha:\s*([0-9]{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4})/i
   );
 
-  const cedisMatch =
-    normalized.match(/Cedis:\s*([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\s-]*)/i) ||
-    normalized.match(/CEDIS:\s*([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\s-]*)/i);
-
   const totalGeneralMatch = normalized.match(
     /TOTAL GENERAL\.-\s*([-\d,]+)\s+([-\d,]+)/i
   );
+
+  const cedisLineValue =
+    extractSingleLineValue(allLines, 'Cedis') ||
+    extractSingleLineValue(allLines, 'CEDIS');
 
   const dateLabel = dateMatch ? normalizeSpaces(dateMatch[1]) : '';
   const dateKey = parseSpanishDateToKey(dateLabel);
@@ -202,7 +256,7 @@ function extractMetaFromText(fullText) {
     week: weekMatch ? normalizeSpaces(weekMatch[1]) : '',
     dateLabel,
     dateKey,
-    cedis: cedisMatch ? normalizeSpaces(cedisMatch[1]) : '',
+    cedis: cleanCedisValue(cedisLineValue),
     totalGeneral: totalGeneralMatch ? parseNumber(totalGeneralMatch[1]) : 0,
     totalGeneralNoDisponible: totalGeneralMatch
       ? parseNumber(totalGeneralMatch[2])
@@ -403,7 +457,7 @@ export async function parseInventoryPdf(file) {
     const allLines = flattenPages(pages);
     const fullText = allLines.join('\n');
 
-    const meta = extractMetaFromText(fullText);
+    const meta = extractMetaFromLines(allLines, fullText);
 
     if (!meta.dateKey) {
       throw new Error('No se pudo detectar la fecha del PDF.');
