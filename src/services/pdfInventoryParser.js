@@ -25,6 +25,16 @@ function normalizeSpaces(value) {
     .trim();
 }
 
+function removeAccents(value) {
+  return String(value || '')
+    .replace(/[áàäâ]/gi, 'a')
+    .replace(/[éèëê]/gi, 'e')
+    .replace(/[íìïî]/gi, 'i')
+    .replace(/[óòöô]/gi, 'o')
+    .replace(/[úùüû]/gi, 'u')
+    .replace(/ñ/gi, 'n');
+}
+
 function cleanLine(value) {
   return normalizeSpaces(
     String(value || '')
@@ -38,10 +48,7 @@ function cleanLine(value) {
 }
 
 function normalizeForCompare(value) {
-  return cleanLine(value)
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+  return removeAccents(cleanLine(value).toLowerCase());
 }
 
 function parseNumber(value) {
@@ -78,7 +85,7 @@ function parseSpanishDateToKey(dateLabel) {
   if (!match) return '';
 
   const day = String(Number(match[1])).padStart(2, '0');
-  const monthName = match[2].normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const monthName = removeAccents(match[2].toLowerCase());
   const year = match[3];
   const month = MONTHS_ES[monthName];
 
@@ -203,8 +210,50 @@ function extractMetaFromText(fullText) {
   };
 }
 
+function readFileAsArrayBuffer(file) {
+  return new Promise(function (resolve, reject) {
+    if (!file) {
+      reject(new Error('No se recibió archivo.'));
+      return;
+    }
+
+    if (typeof file.arrayBuffer === 'function') {
+      file
+        .arrayBuffer()
+        .then(resolve)
+        .catch(function () {
+          const reader = new FileReader();
+
+          reader.onload = function () {
+            resolve(reader.result);
+          };
+
+          reader.onerror = function () {
+            reject(new Error('No se pudo leer el archivo PDF.'));
+          };
+
+          reader.readAsArrayBuffer(file);
+        });
+
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = function () {
+      resolve(reader.result);
+    };
+
+    reader.onerror = function () {
+      reject(new Error('No se pudo leer el archivo PDF.'));
+    };
+
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 async function extractLinesFromPdf(file) {
-  const arrayBuffer = await file.arrayBuffer();
+  const arrayBuffer = await readFileAsArrayBuffer(file);
   const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
   const pdf = await loadingTask.promise;
 
@@ -273,131 +322,142 @@ function computeItemStatus(quantity, noDisponible) {
 }
 
 export async function parseInventoryPdf(file) {
-  if (!file) {
-    throw new Error('No se recibió ningún archivo PDF.');
-  }
-
-  const fileName = String(file.name || '').toLowerCase();
-  const fileType = String(file.type || '').toLowerCase();
-
-  if (
-    fileType &&
-    fileType !== 'application/pdf' &&
-    fileName.slice(-4) !== '.pdf'
-  ) {
-    throw new Error('El archivo seleccionado no es un PDF válido.');
-  }
-
-  const pages = await extractLinesFromPdf(file);
-  const allLines = flattenPages(pages);
-  const fullText = allLines.join('\n');
-
-  const meta = extractMetaFromText(fullText);
-
-  if (!meta.dateKey) {
-    throw new Error('No se pudo detectar la fecha del PDF.');
-  }
-
-  if (!meta.cedis) {
-    throw new Error('No se pudo detectar el CEDIS del PDF.');
-  }
-
-  let currentCategory = null;
-  const categoriesMap = new Map();
-  const items = [];
-
-  for (let i = 0; i < allLines.length; i += 1) {
-    const rawLine = allLines[i];
-    const line = cleanLine(rawLine);
-
-    if (!line || isDecorativeLine(line)) {
-      continue;
+  try {
+    if (!file) {
+      throw new Error('No se recibió ningún archivo PDF.');
     }
 
-    if (isCategoryHeader(line)) {
-      currentCategory = parseCategoryHeader(line);
+    const fileName = String(file.name || '').toLowerCase();
+    const fileType = String(file.type || '').toLowerCase();
 
-      const categoryKey = buildCategoryKey(currentCategory);
+    if (
+      fileType &&
+      fileType !== 'application/pdf' &&
+      fileName.slice(-4) !== '.pdf'
+    ) {
+      throw new Error('El archivo seleccionado no es un PDF válido.');
+    }
 
-      if (!categoriesMap.has(categoryKey)) {
-        categoriesMap.set(categoryKey, {
-          supplierCode: currentCategory.supplierCode,
-          supplierName: currentCategory.supplierName,
-          categoryCode: currentCategory.categoryCode,
-          categoryName: currentCategory.categoryName,
-          categoryRaw: currentCategory.categoryRaw,
-          itemCount: 0,
-          quantityTotal: 0,
-          noDisponibleTotal: 0,
-        });
+    const pages = await extractLinesFromPdf(file);
+    const allLines = flattenPages(pages);
+    const fullText = allLines.join('\n');
+
+    const meta = extractMetaFromText(fullText);
+
+    if (!meta.dateKey) {
+      throw new Error('No se pudo detectar la fecha del PDF.');
+    }
+
+    if (!meta.cedis) {
+      throw new Error('No se pudo detectar el CEDIS del PDF.');
+    }
+
+    let currentCategory = null;
+    const categoriesMap = new Map();
+    const items = [];
+
+    for (let i = 0; i < allLines.length; i += 1) {
+      const rawLine = allLines[i];
+      const line = cleanLine(rawLine);
+
+      if (!line || isDecorativeLine(line)) {
+        continue;
       }
 
-      continue;
+      if (isCategoryHeader(line)) {
+        currentCategory = parseCategoryHeader(line);
+
+        const categoryKey = buildCategoryKey(currentCategory);
+
+        if (!categoriesMap.has(categoryKey)) {
+          categoriesMap.set(categoryKey, {
+            supplierCode: currentCategory.supplierCode,
+            supplierName: currentCategory.supplierName,
+            categoryCode: currentCategory.categoryCode,
+            categoryName: currentCategory.categoryName,
+            categoryRaw: currentCategory.categoryRaw,
+            itemCount: 0,
+            quantityTotal: 0,
+            noDisponibleTotal: 0,
+          });
+        }
+
+        continue;
+      }
+
+      if (isTotalLine(line)) {
+        continue;
+      }
+
+      const parsedProduct = parseProductLine(line);
+
+      if (!parsedProduct || !currentCategory) {
+        continue;
+      }
+
+      const categoryKey = buildCategoryKey(currentCategory);
+      const categoryRef = categoriesMap.get(categoryKey);
+
+      const status = computeItemStatus(
+        parsedProduct.quantity,
+        parsedProduct.noDisponible
+      );
+
+      const item = {
+        productName: parsedProduct.productName,
+        categoryName: currentCategory.categoryName,
+        categoryCode: currentCategory.categoryCode,
+        categoryRaw: currentCategory.categoryRaw,
+        supplierName: currentCategory.supplierName,
+        supplierCode: currentCategory.supplierCode,
+        expectedQuantity: parsedProduct.quantity,
+        unavailableQuantity: parsedProduct.noDisponible,
+        countedQuantity: '',
+        total: '',
+        difference: '',
+        observation: '',
+        countEntries: [],
+        status: status,
+      };
+
+      items.push(item);
+
+      if (categoryRef) {
+        categoryRef.itemCount += 1;
+        categoryRef.quantityTotal += parsedProduct.quantity;
+        categoryRef.noDisponibleTotal += parsedProduct.noDisponible;
+      }
     }
 
-    if (isTotalLine(line)) {
-      continue;
+    if (items.length === 0) {
+      throw new Error('No se detectaron productos válidos dentro del PDF.');
     }
 
-    const parsedProduct = parseProductLine(line);
-
-    if (!parsedProduct || !currentCategory) {
-      continue;
-    }
-
-    const categoryKey = buildCategoryKey(currentCategory);
-    const categoryRef = categoriesMap.get(categoryKey);
-
-    const status = computeItemStatus(
-      parsedProduct.quantity,
-      parsedProduct.noDisponible
-    );
-
-    const item = {
-      productName: parsedProduct.productName,
-      categoryName: currentCategory.categoryName,
-      categoryCode: currentCategory.categoryCode,
-      categoryRaw: currentCategory.categoryRaw,
-      supplierName: currentCategory.supplierName,
-      supplierCode: currentCategory.supplierCode,
-      expectedQuantity: parsedProduct.quantity,
-      unavailableQuantity: parsedProduct.noDisponible,
-      countedQuantity: '',
-      total: '',
-      difference: '',
-      observation: '',
-      countEntries: [],
-      status: status,
-    };
-
-    items.push(item);
-
-    if (categoryRef) {
-      categoryRef.itemCount += 1;
-      categoryRef.quantityTotal += parsedProduct.quantity;
-      categoryRef.noDisponibleTotal += parsedProduct.noDisponible;
-    }
-  }
-
-  if (items.length === 0) {
-    throw new Error('No se detectaron productos válidos dentro del PDF.');
-  }
-
-  const categories = Array.from(categoriesMap.values()).sort(function (a, b) {
-    return a.categoryName.localeCompare(b.categoryName, 'es', {
-      sensitivity: 'base',
+    const categories = Array.from(categoriesMap.values()).sort(function (a, b) {
+      return String(a.categoryName || '').localeCompare(
+        String(b.categoryName || ''),
+        'es'
+      );
     });
-  });
 
-  return {
-    sourceFileName: file.name,
-    week: meta.week,
-    dateLabel: meta.dateLabel,
-    dateKey: meta.dateKey,
-    cedis: meta.cedis,
-    totalGeneral: meta.totalGeneral,
-    totalGeneralNoDisponible: meta.totalGeneralNoDisponible,
-    categories: categories,
-    items: items,
-  };
+    return {
+      sourceFileName: file.name,
+      week: meta.week,
+      dateLabel: meta.dateLabel,
+      dateKey: meta.dateKey,
+      cedis: meta.cedis,
+      totalGeneral: meta.totalGeneral,
+      totalGeneralNoDisponible: meta.totalGeneralNoDisponible,
+      categories: categories,
+      items: items,
+    };
+  } catch (error) {
+    console.error('Error en parseInventoryPdf:', error);
+
+    if (error instanceof Error && error.message) {
+      throw error;
+    }
+
+    throw new Error('No se pudo procesar el PDF en este dispositivo.');
+  }
 }
