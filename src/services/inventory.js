@@ -40,6 +40,29 @@ function safeNullableString(value) {
   return text || '';
 }
 
+function removeAccents(value) {
+  return String(value || '')
+    .replace(/[áàäâ]/gi, 'a')
+    .replace(/[éèëê]/gi, 'e')
+    .replace(/[íìïî]/gi, 'i')
+    .replace(/[óòöô]/gi, 'o')
+    .replace(/[úùüû]/gi, 'u')
+    .replace(/ñ/gi, 'n');
+}
+
+function normalizeObservationLabel(value) {
+  const raw = safeString(value) || 'Buen estado';
+  const normalized = removeAccents(raw).toLowerCase();
+
+  if (normalized === 'buen estado') return 'Buen estado';
+  if (normalized === 'caducado') return 'Caducado';
+  if (normalized === 'danado') return 'Dañado';
+  if (normalized === 'maltratado') return 'Maltratado';
+  if (normalized === 'exhibicion') return 'Exhibición';
+
+  return raw;
+}
+
 function buildEntryId() {
   return `entry_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -55,7 +78,7 @@ function summarizeEntriesByObservation(entries = []) {
   const summary = {};
 
   for (const entry of safeArray(entries)) {
-    const label = safeString(entry.observationType) || 'Buen estado';
+    const label = normalizeObservationLabel(entry?.observationType);
     summary[label] = (summary[label] || 0) + safeNumber(entry.quantity);
   }
 
@@ -74,15 +97,18 @@ function calculateItemStatus(item) {
 
   if (counted <= 0) return 'FALTANTE';
   if ((observationTotals.Caducado || 0) > 0) return 'CADUCADO';
+
   if (
     (observationTotals.Dañado || 0) > 0 ||
     (observationTotals.Maltratado || 0) > 0
   ) {
     return 'DAÑADO';
   }
+
   if (unavailable > 0 || (observationTotals.Exhibición || 0) > 0) {
     return 'ALERTA';
   }
+
   if (expected <= 0) return 'FALTANTE';
 
   return 'OK';
@@ -93,13 +119,21 @@ function normalizeCountEntry(entry) {
     id: safeString(entry?.id) || buildEntryId(),
     quantity: safeNumber(entry?.quantity),
     comment: safeNullableString(entry?.comment),
-    observationType: safeString(entry?.observationType) || 'Buen estado',
+    observationType: normalizeObservationLabel(entry?.observationType),
     createdAt:
       entry?.createdAt && typeof entry.createdAt === 'string'
         ? entry.createdAt
         : new Date().toISOString(),
     createdBy: safeNullableString(entry?.createdBy),
   };
+}
+
+function buildItemIdentity(item) {
+  return [
+    safeString(item?.supplierCode).toLowerCase(),
+    safeString(item?.categoryCode).toLowerCase(),
+    safeString(item?.productName).toLowerCase(),
+  ].join('::');
 }
 
 function normalizeInventoryItem(item) {
@@ -111,6 +145,7 @@ function normalizeInventoryItem(item) {
   );
 
   const normalized = {
+    itemKey: safeString(item?.itemKey) || buildItemIdentity(item),
     productName: safeString(item?.productName),
     categoryName: safeString(item?.categoryName),
     categoryCode: safeString(item?.categoryCode),
@@ -191,6 +226,16 @@ function normalizeInventoryPayload(data = {}, options = {}) {
 
 function isFinalStatus(status) {
   return safeString(status).toUpperCase() === 'GUARDADO';
+}
+
+function findItemOrThrow(items, itemIndex) {
+  const list = safeArray(items);
+
+  if (itemIndex < 0 || itemIndex >= list.length) {
+    throw new Error('Producto no válido para conteo.');
+  }
+
+  return list;
 }
 
 /* =========================
@@ -288,6 +333,34 @@ export async function saveDailyInventoryFromPdf(
   }
 
   const existingInventory = await getInventoryByDate(dateKey);
+  const existingItems = safeArray(existingInventory?.items).map(
+    normalizeInventoryItem
+  );
+
+  const existingItemsMap = new Map(
+    existingItems.map((item) => [buildItemIdentity(item), item])
+  );
+
+  const mergedItems = safeArray(parsedInventory?.items).map((item) => {
+    const normalizedIncoming = normalizeInventoryItem({
+      ...item,
+      countEntries: [],
+    });
+
+    const existingItem = existingItemsMap.get(
+      buildItemIdentity(normalizedIncoming)
+    );
+
+    if (!existingItem) {
+      return normalizedIncoming;
+    }
+
+    return normalizeInventoryItem({
+      ...normalizedIncoming,
+      countEntries: safeArray(existingItem.countEntries),
+      observation: existingItem.observation || '',
+    });
+  });
 
   const payload = {
     date: safeString(parsedInventory?.dateLabel),
@@ -300,22 +373,7 @@ export async function saveDailyInventoryFromPdf(
     importedByEmail: safeString(userEmail),
     notes: existingInventory?.notes || '',
     categories: safeArray(parsedInventory?.categories),
-    items: safeArray(parsedInventory?.items).map((item, index) => {
-      const existingItem = safeArray(existingInventory?.items)[index];
-
-      if (!existingItem) {
-        return normalizeInventoryItem({
-          ...item,
-          countEntries: [],
-        });
-      }
-
-      return normalizeInventoryItem({
-        ...item,
-        countEntries: safeArray(existingItem.countEntries),
-        observation: existingItem.observation || '',
-      });
-    }),
+    items: mergedItems,
     countingStarted: Boolean(existingInventory?.countingStarted),
     countingFinished: Boolean(existingInventory?.countingFinished),
     finalizedAt: existingInventory?.finalizedAt || null,
@@ -350,6 +408,7 @@ export async function startInventoryCount(inventoryId) {
     countingFinished: false,
     finalizedAt: null,
     finalizedByEmail: '',
+    lastCountUpdatedAt: serverTimestamp(),
   });
 
   return await getInventoryById(inventoryId);
@@ -370,11 +429,7 @@ export async function addInventoryCountEntry(
     throw new Error('Inventario no encontrado.');
   }
 
-  const items = safeArray(currentInventory.items);
-
-  if (itemIndex < 0 || itemIndex >= items.length) {
-    throw new Error('Producto no válido para conteo.');
-  }
+  const items = findItemOrThrow(currentInventory.items, itemIndex);
 
   const updatedItems = items.map((item, index) => {
     if (index !== itemIndex) {
@@ -410,6 +465,66 @@ export async function addInventoryCountEntry(
 }
 
 /**
+ * Edita un conteo ya existente.
+ */
+export async function updateInventoryCountEntry(
+  inventoryId,
+  itemIndex,
+  entryId,
+  updates = {},
+  actorEmail = ''
+) {
+  const currentInventory = await getInventoryById(inventoryId);
+
+  if (!currentInventory) {
+    throw new Error('Inventario no encontrado.');
+  }
+
+  const items = findItemOrThrow(currentInventory.items, itemIndex);
+  const normalizedEntryId = safeString(entryId);
+
+  if (!normalizedEntryId) {
+    throw new Error('No se recibió el id del conteo.');
+  }
+
+  const updatedItems = items.map((item, index) => {
+    if (index !== itemIndex) {
+      return normalizeInventoryItem(item);
+    }
+
+    const normalizedItem = normalizeInventoryItem(item);
+
+    const nextEntries = safeArray(normalizedItem.countEntries).map((entry) => {
+      if (safeString(entry.id) !== normalizedEntryId) {
+        return entry;
+      }
+
+      return normalizeCountEntry({
+        ...entry,
+        ...updates,
+        createdBy: safeString(actorEmail) || safeString(entry.createdBy),
+      });
+    });
+
+    return normalizeInventoryItem({
+      ...normalizedItem,
+      countEntries: nextEntries,
+    });
+  });
+
+  await updateInventory(inventoryId, {
+    ...currentInventory,
+    items: updatedItems,
+    status: 'BORRADOR',
+    countingStarted: true,
+    countingFinished: false,
+    lastCountUpdatedAt: serverTimestamp(),
+  });
+
+  return await getInventoryById(inventoryId);
+}
+
+/**
  * Elimina un conteo en tiempo real.
  */
 export async function removeInventoryCountEntry(
@@ -423,12 +538,7 @@ export async function removeInventoryCountEntry(
     throw new Error('Inventario no encontrado.');
   }
 
-  const items = safeArray(currentInventory.items);
-
-  if (itemIndex < 0 || itemIndex >= items.length) {
-    throw new Error('Producto no válido para conteo.');
-  }
-
+  const items = findItemOrThrow(currentInventory.items, itemIndex);
   const normalizedEntryId = safeString(entryId);
 
   if (!normalizedEntryId) {
@@ -444,6 +554,55 @@ export async function removeInventoryCountEntry(
 
     const nextEntries = safeArray(normalizedItem.countEntries).filter(
       (entry) => safeString(entry.id) !== normalizedEntryId
+    );
+
+    return normalizeInventoryItem({
+      ...normalizedItem,
+      countEntries: nextEntries,
+    });
+  });
+
+  await updateInventory(inventoryId, {
+    ...currentInventory,
+    items: updatedItems,
+    status: 'BORRADOR',
+    countingStarted: true,
+    countingFinished: false,
+    lastCountUpdatedAt: serverTimestamp(),
+  });
+
+  return await getInventoryById(inventoryId);
+}
+
+/**
+ * Reemplaza todos los conteos de un producto.
+ */
+export async function replaceInventoryItemEntries(
+  inventoryId,
+  itemIndex,
+  entries = [],
+  actorEmail = ''
+) {
+  const currentInventory = await getInventoryById(inventoryId);
+
+  if (!currentInventory) {
+    throw new Error('Inventario no encontrado.');
+  }
+
+  const items = findItemOrThrow(currentInventory.items, itemIndex);
+
+  const updatedItems = items.map((item, index) => {
+    if (index !== itemIndex) {
+      return normalizeInventoryItem(item);
+    }
+
+    const normalizedItem = normalizeInventoryItem(item);
+
+    const nextEntries = safeArray(entries).map((entry) =>
+      normalizeCountEntry({
+        ...entry,
+        createdBy: safeString(entry?.createdBy) || safeString(actorEmail),
+      })
     );
 
     return normalizeInventoryItem({
