@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   Upload,
   FileText,
@@ -24,7 +24,7 @@ const MAX_FILE_SIZE_MB = 20;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 function formatFileSize(bytes = 0) {
-  if (!bytes) return '0 MB';
+  if (!bytes || !Number.isFinite(bytes)) return '0 MB';
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
@@ -35,15 +35,21 @@ function cleanText(value) {
 }
 
 function toSafeNumber(value) {
-  const parsed = Number(value);
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+
+  const normalized = String(value ?? '')
+    .replace(/,/g, '')
+    .replace(/[^\d.-]/g, '');
+
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function buildCategoryId(category, index = 0) {
   return [
-    category?.supplierCode || 'supplier',
-    category?.categoryCode || 'category',
-    category?.categoryName || index,
+    cleanText(category?.supplierCode) || 'supplier',
+    cleanText(category?.categoryCode) || 'category',
+    cleanText(category?.categoryName) || `name-${index}`,
     index,
   ].join('-');
 }
@@ -54,17 +60,27 @@ function normalizeItem(item, categoryId, index = 0) {
   const unavailableQuantity = toSafeNumber(item?.unavailableQuantity);
 
   return {
-    id: item?.itemKey || `${categoryId}-product-${index}-${name}`,
+    id:
+      cleanText(item?.itemKey) ||
+      `${categoryId}-product-${index}-${name.replace(/\s+/g, '-')}`,
     name,
     quantity,
     unavailableQuantity,
-    supplierCode: item?.supplierCode || '',
-    supplierName: item?.supplierName || '',
-    categoryCode: item?.categoryCode || '',
-    categoryName: item?.categoryName || '',
-    categoryRaw: item?.categoryRaw || '',
-    status: item?.status || 'OK',
+    supplierCode: cleanText(item?.supplierCode),
+    supplierName: cleanText(item?.supplierName),
+    categoryCode: cleanText(item?.categoryCode),
+    categoryName: cleanText(item?.categoryName),
+    categoryRaw: cleanText(item?.categoryRaw),
+    status: cleanText(item?.status) || 'OK',
   };
+}
+
+function matchesCategory(item, category) {
+  return (
+    cleanText(item?.supplierCode) === cleanText(category?.supplierCode) &&
+    cleanText(item?.categoryCode) === cleanText(category?.categoryCode) &&
+    cleanText(item?.categoryName) === cleanText(category?.categoryName)
+  );
 }
 
 function normalizeCategory(category, allItems = [], index = 0) {
@@ -77,13 +93,7 @@ function normalizeCategory(category, allItems = [], index = 0) {
   const id = buildCategoryId(category, index);
 
   const products = allItems
-    .filter((item) => {
-      return (
-        cleanText(item?.supplierCode) === cleanText(category?.supplierCode) &&
-        cleanText(item?.categoryCode) === cleanText(category?.categoryCode) &&
-        cleanText(item?.categoryName) === cleanText(category?.categoryName)
-      );
-    })
+    .filter((item) => matchesCategory(item, category))
     .map((item, productIndex) => normalizeItem(item, id, productIndex));
 
   const totalUnits = products.reduce(
@@ -100,10 +110,10 @@ function normalizeCategory(category, allItems = [], index = 0) {
     id,
     name: rawName,
     fullName: rawName,
-    supplierCode: category?.supplierCode || '',
-    supplierName: category?.supplierName || '',
-    categoryCode: category?.categoryCode || '',
-    categoryName: category?.categoryName || '',
+    supplierCode: cleanText(category?.supplierCode),
+    supplierName: cleanText(category?.supplierName),
+    categoryCode: cleanText(category?.categoryCode),
+    categoryName: cleanText(category?.categoryName),
     products,
     totalUnits,
     totalUnavailable,
@@ -117,18 +127,32 @@ function normalizeParserResult(result) {
     ? result.categories
     : [];
 
-  const categories = rawCategories.map((category, index) =>
-    normalizeCategory(category, rawItems, index)
-  );
+  const categories = rawCategories
+    .map((category, index) => normalizeCategory(category, rawItems, index))
+    .filter((category) => category.fullName || category.products.length > 0);
+
+  const totalGeneral =
+    toSafeNumber(result?.totalGeneral) ||
+    categories.reduce(
+      (sum, category) => sum + toSafeNumber(category.totalUnits),
+      0
+    );
+
+  const totalGeneralNoDisponible =
+    toSafeNumber(result?.totalGeneralNoDisponible) ||
+    categories.reduce(
+      (sum, category) => sum + toSafeNumber(category.totalUnavailable),
+      0
+    );
 
   return {
-    sourceFileName: result?.sourceFileName || '',
-    week: result?.week || '',
-    dateLabel: result?.dateLabel || '',
-    dateKey: result?.dateKey || '',
-    cedis: result?.cedis || '',
-    totalGeneral: toSafeNumber(result?.totalGeneral),
-    totalGeneralNoDisponible: toSafeNumber(result?.totalGeneralNoDisponible),
+    sourceFileName: cleanText(result?.sourceFileName),
+    week: cleanText(result?.week),
+    dateLabel: cleanText(result?.dateLabel),
+    dateKey: cleanText(result?.dateKey),
+    cedis: cleanText(result?.cedis),
+    totalGeneral,
+    totalGeneralNoDisponible,
     totals: result?.totals || {},
     items: rawItems,
     categories,
@@ -143,6 +167,26 @@ function buildExpandedState(categories, expand = true) {
   }, {});
 }
 
+function EmptyState({ search }) {
+  return (
+    <div className="rounded-[28px] border border-white/10 bg-[#050505] p-6">
+      <div className="flex items-start gap-3 text-zinc-400">
+        <FileWarning size={20} className="mt-0.5 shrink-0" />
+        <div>
+          <p className="text-sm font-medium text-zinc-200">
+            No se encontraron resultados
+          </p>
+          <p className="mt-1 text-sm leading-6">
+            {search
+              ? 'No hay categorías o productos que coincidan con tu búsqueda.'
+              : 'No se detectaron categorías ni productos válidos en el PDF.'}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ImportPDFPage({ onImportReady }) {
   const inputRef = useRef(null);
 
@@ -154,19 +198,19 @@ export default function ImportPDFPage({ onImportReady }) {
   const [search, setSearch] = useState('');
   const [expandedCategories, setExpandedCategories] = useState({});
 
-  const resetParsedState = () => {
+  const resetParsedState = useCallback(() => {
     setData(null);
     setError('');
     setSearch('');
     setExpandedCategories({});
-  };
+  }, []);
 
-  const openFilePicker = () => {
+  const openFilePicker = useCallback(() => {
     if (loading) return;
     inputRef.current?.click();
-  };
+  }, [loading]);
 
-  const resetAll = () => {
+  const resetAll = useCallback(() => {
     setFile(null);
     setLoading(false);
     resetParsedState();
@@ -174,9 +218,9 @@ export default function ImportPDFPage({ onImportReady }) {
     if (inputRef.current) {
       inputRef.current.value = '';
     }
-  };
+  }, [resetParsedState]);
 
-  const isValidPDF = (selectedFile) => {
+  const isValidPDF = useCallback((selectedFile) => {
     if (!selectedFile) {
       return 'No se seleccionó ningún archivo.';
     }
@@ -196,55 +240,58 @@ export default function ImportPDFPage({ onImportReady }) {
     }
 
     return '';
-  };
+  }, []);
 
-  const processSelectedFile = async (selectedFile) => {
-    const validationError = isValidPDF(selectedFile);
+  const processSelectedFile = useCallback(
+    async (selectedFile) => {
+      const validationError = isValidPDF(selectedFile);
 
-    if (validationError) {
-      setFile(null);
-      setLoading(false);
-      setData(null);
-      setError(validationError);
-      return;
-    }
-
-    setFile(selectedFile);
-    setLoading(true);
-    resetParsedState();
-
-    try {
-      const result = await parseInventoryPdf(selectedFile);
-      const normalized = normalizeParserResult(result);
-
-      if (!normalized || !Array.isArray(normalized.categories)) {
-        throw new Error('Formato de respuesta inválido del parser.');
+      if (validationError) {
+        setFile(null);
+        setLoading(false);
+        setData(null);
+        setError(validationError);
+        return;
       }
 
-      setData(normalized);
-      setExpandedCategories(buildExpandedState(normalized.categories, true));
+      setFile(selectedFile);
+      setLoading(true);
+      resetParsedState();
 
-      if (typeof onImportReady === 'function') {
-        onImportReady(normalized, selectedFile);
+      try {
+        const result = await parseInventoryPdf(selectedFile);
+        const normalized = normalizeParserResult(result);
+
+        if (!normalized || !Array.isArray(normalized.categories)) {
+          throw new Error('Formato de respuesta inválido del parser.');
+        }
+
+        setData(normalized);
+        setExpandedCategories(buildExpandedState(normalized.categories, true));
+
+        if (typeof onImportReady === 'function') {
+          onImportReady(normalized, selectedFile);
+        }
+      } catch (err) {
+        console.error('Error procesando PDF:', err);
+
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : 'No se pudo procesar el PDF. Revisa el archivo y vuelve a intentarlo.';
+
+        setError(message);
+        setData(null);
+      } finally {
+        setLoading(false);
+
+        if (inputRef.current) {
+          inputRef.current.value = '';
+        }
       }
-    } catch (err) {
-      console.error('Error procesando PDF:', err);
-
-      setError(
-        err instanceof Error && err.message
-          ? err.message
-          : 'No se pudo procesar el PDF. Revisa el archivo y vuelve a intentarlo.'
-      );
-
-      setData(null);
-    } finally {
-      setLoading(false);
-
-      if (inputRef.current) {
-        inputRef.current.value = '';
-      }
-    }
-  };
+    },
+    [isValidPDF, onImportReady, resetParsedState]
+  );
 
   const handleFileChange = async (e) => {
     const selected = e.target.files?.[0];
@@ -289,7 +336,6 @@ export default function ImportPDFPage({ onImportReady }) {
     if (!data?.categories?.length) return [];
 
     const term = cleanText(search).toLowerCase();
-
     if (!term) return data.categories;
 
     return data.categories
@@ -298,9 +344,11 @@ export default function ImportPDFPage({ onImportReady }) {
           .toLowerCase()
           .includes(term);
 
-        const filteredProducts = category.products.filter((product) =>
-          cleanText(product.name).toLowerCase().includes(term)
-        );
+        const filteredProducts = Array.isArray(category.products)
+          ? category.products.filter((product) =>
+              cleanText(product.name).toLowerCase().includes(term)
+            )
+          : [];
 
         if (categoryMatches) {
           return category;
@@ -350,12 +398,12 @@ export default function ImportPDFPage({ onImportReady }) {
   const filteredTotalCategories = filteredCategories.length;
 
   const filteredTotalProducts = filteredCategories.reduce(
-    (acc, category) => acc + category.products.length,
+    (acc, category) => acc + (category?.products?.length || 0),
     0
   );
 
   const filteredTotalUnits = filteredCategories.reduce(
-    (acc, category) => acc + toSafeNumber(category.totalUnits),
+    (acc, category) => acc + toSafeNumber(category?.totalUnits),
     0
   );
 
@@ -403,9 +451,11 @@ export default function ImportPDFPage({ onImportReady }) {
             <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-blue-300">
               Flujo de inventario
             </p>
+
             <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
               Importar PDF del día
             </h1>
+
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400 sm:text-base">
               Sube el PDF oficial del inventario diario. El sistema detecta
               fecha, CEDIS, categorías y productos para preparar el inventario
@@ -522,7 +572,7 @@ export default function ImportPDFPage({ onImportReady }) {
       {error && (
         <section className="rounded-[28px] border border-red-900/50 bg-red-950/30 p-4 sm:p-6">
           <div className="flex items-start gap-3">
-            <div className="mt-0.5 text-red-400">
+            <div className="mt-0.5 shrink-0 text-red-400">
               <AlertCircle size={20} />
             </div>
 
@@ -540,7 +590,7 @@ export default function ImportPDFPage({ onImportReady }) {
         <div className="space-y-4">
           <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 sm:p-6">
             <div className="flex items-start gap-3">
-              <div className="text-emerald-400">
+              <div className="shrink-0 text-emerald-400">
                 <CheckCircle2 size={22} />
               </div>
 
@@ -702,20 +752,7 @@ export default function ImportPDFPage({ onImportReady }) {
 
           <section className="space-y-4">
             {!hasFilteredResults ? (
-              <div className="rounded-[28px] border border-white/10 bg-[#050505] p-6">
-                <div className="flex items-start gap-3 text-zinc-400">
-                  <FileWarning size={20} className="mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-zinc-200">
-                      No se encontraron resultados
-                    </p>
-                    <p className="mt-1 text-sm leading-6">
-                      No hay categorías o productos que coincidan con tu
-                      búsqueda.
-                    </p>
-                  </div>
-                </div>
-              </div>
+              <EmptyState search={search} />
             ) : (
               filteredCategories.map((category, index) => {
                 const isExpanded = expandedCategories[category.id] ?? true;
@@ -737,6 +774,7 @@ export default function ImportPDFPage({ onImportReady }) {
                         <h3 className="break-words text-base font-semibold text-blue-400 sm:text-lg">
                           {category.fullName || `Categoría ${index + 1}`}
                         </h3>
+
                         <p className="mt-1 text-sm text-zinc-400">
                           {products.length} productos •{' '}
                           {toSafeNumber(category.totalUnits).toLocaleString(
