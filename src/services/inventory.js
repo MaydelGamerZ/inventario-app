@@ -167,12 +167,14 @@ function normalizeInventoryItem(item = {}, index = 0) {
 
   return {
     itemKey,
+    itemOrder: safeNumber(item.itemOrder ?? index),
     productName: cleanText(item.productName) || `Producto ${index + 1}`,
     expectedQuantity: safeNumber(item.expectedQuantity),
     unavailableQuantity: safeNumber(item.unavailableQuantity),
     countedQuantity: safeNumber(item.countedQuantity),
     supplierCode: cleanText(item.supplierCode),
     supplierName: cleanText(item.supplierName),
+    categoryOrder: safeNumber(item.categoryOrder),
     categoryCode: cleanText(item.categoryCode),
     categoryName: cleanText(item.categoryName),
     categoryRaw: cleanText(item.categoryRaw),
@@ -263,6 +265,7 @@ function normalizeCategories(categories = []) {
       cleanText(category.categoryRaw) ||
       cleanText(category.categoryName) ||
       `Categoría ${index + 1}`,
+    categoryOrder: safeNumber(category.categoryOrder ?? index),
     totalUnits: safeNumber(category.totalUnits ?? category.quantityTotal),
     totalUnavailable: safeNumber(
       category.totalUnavailable ?? category.noDisponibleTotal

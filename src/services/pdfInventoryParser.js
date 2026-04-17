@@ -595,6 +595,7 @@ export async function parseInventoryPdf(file) {
             categoryName: currentCategory.categoryName,
             categoryRaw: currentCategory.categoryRaw,
             fullName: currentCategory.fullName,
+            categoryOrder: categoriesMap.size,
             itemCount: 0,
             quantityTotal: 0,
             noDisponibleTotal: 0,
@@ -624,10 +625,12 @@ export async function parseInventoryPdf(file) {
           currentCategory.categoryCode,
           parsedProduct.productName,
         ].join('::'),
+        itemOrder: items.length,
         productName: parsedProduct.productName,
         categoryName: currentCategory.categoryName,
         categoryCode: currentCategory.categoryCode,
         categoryRaw: currentCategory.categoryRaw,
+        categoryOrder: categoryRef?.categoryOrder ?? 0,
         supplierName: currentCategory.supplierName,
         supplierCode: currentCategory.supplierCode,
         expectedQuantity: parsedProduct.quantity,
@@ -653,13 +656,7 @@ export async function parseInventoryPdf(file) {
       throw new Error('No se detectaron productos válidos dentro del PDF.');
     }
 
-    const categories = Array.from(categoriesMap.values()).sort((a, b) =>
-      String(a.fullName || a.categoryName || '').localeCompare(
-        String(b.fullName || b.categoryName || ''),
-        'es',
-        { sensitivity: 'base' }
-      )
-    );
+    const categories = Array.from(categoriesMap.values());
 
     const totals = buildTotals(items, categories);
 

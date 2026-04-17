@@ -71,10 +71,9 @@ function buildFilename(inventory) {
   return `inventario-${clean}.pdf`;
 }
 
-function sortCategories(a, b) {
-  return safeString(a).localeCompare(safeString(b), 'es', {
-    sensitivity: 'base',
-  });
+function safeOrder(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function getDifferenceLabel(expected, counted) {
@@ -85,8 +84,8 @@ function getDifferenceLabel(expected, counted) {
 }
 
 function buildGroupedData(items = []) {
-  const groupedItems = {};
-  const categoryTotalsMap = {};
+  const groupedItems = new Map();
+  const categoryTotalsMap = new Map();
 
   const generalTotals = {
     expected: 0,
@@ -105,11 +104,16 @@ function buildGroupedData(items = []) {
 
   items.forEach((item) => {
     const categoryName = safeString(item?.categoryName) || 'Sin categoría';
+    const categoryKey = [
+      safeString(item?.supplierCode),
+      safeString(item?.categoryCode),
+      categoryName,
+    ].join('::');
     const productName = safeString(item?.productName) || 'Sin nombre';
     const supplierName = safeString(item?.supplierName);
 
-    if (!groupedItems[categoryName]) {
-      groupedItems[categoryName] = [];
+    if (!groupedItems.has(categoryKey)) {
+      groupedItems.set(categoryKey, []);
     }
 
     const expected = safeNumber(item?.expectedQuantity);
@@ -120,6 +124,7 @@ function buildGroupedData(items = []) {
     const row = {
       productName,
       supplierName,
+      itemOrder: safeOrder(item?.itemOrder, items.length),
       expected,
       unavailable,
       good: counts.good,
@@ -132,11 +137,12 @@ function buildGroupedData(items = []) {
       surplus: diff.type === 'SOBRA' ? diff.value : 0,
     };
 
-    groupedItems[categoryName].push(row);
+    groupedItems.get(categoryKey).push(row);
 
-    if (!categoryTotalsMap[categoryName]) {
-      categoryTotalsMap[categoryName] = {
+    if (!categoryTotalsMap.has(categoryKey)) {
+      categoryTotalsMap.set(categoryKey, {
         categoryName,
+        categoryOrder: safeOrder(item?.categoryOrder, categoryTotalsMap.size),
         itemCount: 0,
         expected: 0,
         unavailable: 0,
@@ -148,10 +154,10 @@ function buildGroupedData(items = []) {
         totalCount: 0,
         shortage: 0,
         surplus: 0,
-      };
+      });
     }
 
-    const cat = categoryTotalsMap[categoryName];
+    const cat = categoryTotalsMap.get(categoryKey);
     cat.itemCount += 1;
     cat.expected += expected;
     cat.unavailable += unavailable;
@@ -177,13 +183,28 @@ function buildGroupedData(items = []) {
     generalTotals.products += 1;
   });
 
-  generalTotals.categories = Object.keys(groupedItems).length;
+  generalTotals.categories = groupedItems.size;
+
+  const categoryKeys = Array.from(groupedItems.keys()).sort((a, b) => {
+    const aCategory = categoryTotalsMap.get(a);
+    const bCategory = categoryTotalsMap.get(b);
+    const byOrder =
+      safeOrder(aCategory?.categoryOrder) - safeOrder(bCategory?.categoryOrder);
+
+    if (byOrder !== 0) return byOrder;
+
+    return safeString(aCategory?.categoryName).localeCompare(
+      safeString(bCategory?.categoryName),
+      'es',
+      { sensitivity: 'base' }
+    );
+  });
 
   return {
     groupedItems,
     categoryTotalsMap,
     generalTotals,
-    categoryNames: Object.keys(groupedItems).sort(sortCategories),
+    categoryKeys,
   };
 }
 
@@ -289,7 +310,7 @@ export async function exportInventoryToPDF(inventory) {
   const marginX = 10;
   let currentY = 10;
 
-  const { groupedItems, categoryTotalsMap, generalTotals, categoryNames } =
+  const { groupedItems, categoryTotalsMap, generalTotals, categoryKeys } =
     buildGroupedData(items);
 
   drawHeader(doc, inventory, pageWidth, marginX);
@@ -314,9 +335,12 @@ export async function exportInventoryToPDF(inventory) {
     ],
   ];
 
-  categoryNames.forEach((categoryName) => {
-    const categoryItems = groupedItems[categoryName] || [];
-    const cat = categoryTotalsMap[categoryName];
+  categoryKeys.forEach((categoryKey) => {
+    const categoryItems = [...(groupedItems.get(categoryKey) || [])].sort(
+      (a, b) => safeOrder(a.itemOrder) - safeOrder(b.itemOrder)
+    );
+    const cat = categoryTotalsMap.get(categoryKey);
+    const categoryName = cat?.categoryName || 'Sin categoria';
 
     if (currentY > 238) {
       doc.addPage();

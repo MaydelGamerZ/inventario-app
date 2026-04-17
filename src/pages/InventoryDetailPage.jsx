@@ -229,8 +229,14 @@ function buildInitialDraft() {
   };
 }
 
-function sortItems(items = [], sortMode = 'counted-first') {
+function sortItems(items = [], sortMode = 'pdf-order') {
   const list = Array.isArray(items) ? [...items] : [];
+
+  if (sortMode === 'pdf-order') {
+    return list.sort(
+      (a, b) => safeNumber(a?.itemOrder) - safeNumber(b?.itemOrder)
+    );
+  }
 
   return list.sort((a, b) => {
     const aCounted = getCountedQuantity(a);
@@ -261,7 +267,7 @@ function sortItems(items = [], sortMode = 'counted-first') {
   });
 }
 
-function groupItemsByCategory(items = [], sortMode = 'counted-first') {
+function groupItemsByCategory(items = [], sortMode = 'pdf-order') {
   const map = new Map();
 
   for (const item of Array.isArray(items) ? items : []) {
@@ -280,15 +286,25 @@ function groupItemsByCategory(items = [], sortMode = 'counted-first') {
       map.set(groupId, {
         id: groupId,
         name: categoryName,
+        categoryOrder: safeNumber(item?.categoryOrder),
+        firstItemOrder: safeNumber(item?.itemOrder),
         items: [],
       });
     }
 
-    map.get(groupId).items.push(item);
+    const group = map.get(groupId);
+    group.items.push(item);
+    group.categoryOrder = Math.min(
+      group.categoryOrder,
+      safeNumber(item?.categoryOrder)
+    );
+    group.firstItemOrder = Math.min(
+      group.firstItemOrder,
+      safeNumber(item?.itemOrder)
+    );
   }
 
-  return Array.from(map.values())
-    .map((group) => {
+  const groups = Array.from(map.values()).map((group) => {
       const sortedItems = sortItems(group.items, sortMode);
 
       return {
@@ -304,8 +320,21 @@ function groupItemsByCategory(items = [], sortMode = 'counted-first') {
           0
         ),
       };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
+    });
+
+  if (sortMode === 'pdf-order') {
+    return groups.sort((a, b) => {
+      if (a.categoryOrder !== b.categoryOrder) {
+        return a.categoryOrder - b.categoryOrder;
+      }
+
+      return a.firstItemOrder - b.firstItemOrder;
+    });
+  }
+
+  return groups.sort((a, b) =>
+    a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
+  );
 }
 
 function StatCard({ icon: Icon, title, value, iconClassName = 'text-zinc-300' }) {
@@ -329,6 +358,7 @@ function StatCard({ icon: Icon, title, value, iconClassName = 'text-zinc-300' })
 }
 
 const SORT_MODE_OPTIONS = [
+  { value: 'pdf-order', label: 'Ordenar: orden del PDF' },
   { value: 'counted-first', label: 'Ordenar: contados primero' },
   { value: 'difference', label: 'Ordenar: mayor diferencia' },
   { value: 'name', label: 'Ordenar: nombre' },
@@ -362,7 +392,7 @@ export default function InventoryDetailPage() {
   const [drafts, setDrafts] = useState({});
   const [busyAdd, setBusyAdd] = useState({});
   const [busyDelete, setBusyDelete] = useState({});
-  const [sortMode, setSortMode] = useState('counted-first');
+  const [sortMode, setSortMode] = useState('pdf-order');
   const [showOnlyCounted, setShowOnlyCounted] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState({});
 
