@@ -466,10 +466,8 @@ export async function getInventoryByDate(dateKey) {
  * Traemos por updatedAt desc y luego filtramos en JS cuando haga falta en la página.
  */
 export function subscribeAllInventories(callback) {
-  const q = query(collection(db, INVENTORIES_COLLECTION));
-
   return onSnapshot(
-    q,
+    collection(db, INVENTORIES_COLLECTION),
     (snapshot) => {
       const list = snapshot.docs
         .map((docSnap) => normalizeInventoryDoc(docSnap))
