@@ -68,13 +68,109 @@ function safeNumber(value) {
 }
 
 /**
+ * Convierte fechas de entrada a texto estable para UI/Firestore.
+ */
+function normalizeEntryDate(value) {
+  if (!value) return '';
+
+  if (typeof value?.toDate === 'function') {
+    return value.toDate().toISOString();
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  return cleanText(value);
+}
+
+/**
+ * Genera un id utilizable para entradas de conteo.
+ */
+function buildCountEntryId(itemKey, index = 0) {
+  return `${cleanText(itemKey) || 'item'}-entry-${index}`;
+}
+
+/**
+ * Normaliza una entrada de conteo.
+ */
+function normalizeCountEntry(entry = {}, itemKey, index = 0) {
+  return {
+    id: cleanText(entry.id) || buildCountEntryId(itemKey, index),
+    quantity: safeNumber(entry.quantity),
+    observationType: cleanText(entry.observationType || 'Buen estado'),
+    comment: cleanText(entry.comment),
+    createdByEmail: cleanText(entry.createdByEmail),
+    createdBy: cleanText(entry.createdBy),
+    createdAt: normalizeEntryDate(entry.createdAt),
+    createdAtLabel: cleanText(entry.createdAtLabel),
+  };
+}
+
+/**
+ * Localiza un producto por itemKey o por índice.
+ */
+function findInventoryItemIndex(items = [], itemReference) {
+  const cleanItemReference = cleanText(itemReference);
+  const keyMatchIndex = items.findIndex(
+    (item) => cleanText(item.itemKey) === cleanItemReference
+  );
+
+  if (keyMatchIndex >= 0) {
+    return keyMatchIndex;
+  }
+
+  const numericIndex =
+    typeof itemReference === 'number' && Number.isInteger(itemReference)
+      ? itemReference
+      : Number.isInteger(Number(cleanItemReference))
+        ? Number(cleanItemReference)
+        : -1;
+
+  if (numericIndex >= 0 && numericIndex < items.length) {
+    return numericIndex;
+  }
+
+  return -1;
+}
+
+/**
+ * Localiza una entrada por id o por índice.
+ */
+function findCountEntryIndex(entries = [], entryReference) {
+  const cleanEntryReference = cleanText(entryReference);
+  const idMatchIndex = entries.findIndex(
+    (entry) => cleanText(entry.id) === cleanEntryReference
+  );
+
+  if (idMatchIndex >= 0) {
+    return idMatchIndex;
+  }
+
+  const numericIndex =
+    typeof entryReference === 'number' && Number.isInteger(entryReference)
+      ? entryReference
+      : Number.isInteger(Number(cleanEntryReference))
+        ? Number(cleanEntryReference)
+        : -1;
+
+  if (numericIndex >= 0 && numericIndex < entries.length) {
+    return numericIndex;
+  }
+
+  return -1;
+}
+
+/**
  * Normaliza un item del inventario.
  */
 function normalizeInventoryItem(item = {}, index = 0) {
+  const itemKey =
+    cleanText(item.itemKey) ||
+    `item-${index}-${cleanText(item.productName || 'producto')}`;
+
   return {
-    itemKey:
-      cleanText(item.itemKey) ||
-      `item-${index}-${cleanText(item.productName || 'producto')}`,
+    itemKey,
     productName: cleanText(item.productName) || `Producto ${index + 1}`,
     expectedQuantity: safeNumber(item.expectedQuantity),
     unavailableQuantity: safeNumber(item.unavailableQuantity),
@@ -85,7 +181,11 @@ function normalizeInventoryItem(item = {}, index = 0) {
     categoryName: cleanText(item.categoryName),
     categoryRaw: cleanText(item.categoryRaw),
     status: cleanText(item.status || 'OK').toUpperCase(),
-    countEntries: Array.isArray(item.countEntries) ? item.countEntries : [],
+    countEntries: Array.isArray(item.countEntries)
+      ? item.countEntries.map((entry, entryIndex) =>
+          normalizeCountEntry(entry, itemKey, entryIndex)
+        )
+      : [],
   };
 }
 
@@ -464,11 +564,17 @@ export async function addInventoryCountEntry(
   }
 
   const inventory = normalizeInventoryDoc(snap);
+  const targetIndex = findInventoryItemIndex(inventory.items, itemKey);
 
-  const items = inventory.items.map((item) => {
-    if (cleanText(item.itemKey) !== cleanItemKey) return item;
+  if (targetIndex < 0) {
+    throw new Error('No se encontrÃ³ el producto dentro del inventario.');
+  }
+
+  const items = inventory.items.map((item, index) => {
+    if (index !== targetIndex) return item;
 
     const nextEntry = {
+      id: cleanText(entry?.id) || `${item.itemKey}-${Date.now()}`,
       quantity: safeNumber(entry?.quantity),
       observationType: cleanText(entry?.observationType || 'Buen estado'),
       comment: cleanText(entry?.comment),
@@ -507,7 +613,7 @@ export async function addInventoryCountEntry(
 export async function removeInventoryCountEntry(
   inventoryId,
   itemKey,
-  entryIndex
+  entryReference
 ) {
   const cleanId = cleanText(inventoryId);
   const cleanItemKey = cleanText(itemKey);
@@ -524,15 +630,26 @@ export async function removeInventoryCountEntry(
   }
 
   const inventory = normalizeInventoryDoc(snap);
+  const targetIndex = findInventoryItemIndex(inventory.items, itemKey);
 
-  const items = inventory.items.map((item) => {
-    if (cleanText(item.itemKey) !== cleanItemKey) return item;
+  if (targetIndex < 0) {
+    throw new Error('No se encontrÃ³ el producto dentro del inventario.');
+  }
+
+  const items = inventory.items.map((item, index) => {
+    if (index !== targetIndex) return item;
 
     const currentEntries = Array.isArray(item.countEntries)
       ? item.countEntries
       : [];
+    const targetEntryIndex = findCountEntryIndex(currentEntries, entryReference);
+
+    if (targetEntryIndex < 0) {
+      throw new Error('No se encontrÃ³ el conteo seleccionado.');
+    }
+
     const nextEntries = currentEntries.filter(
-      (_, index) => index !== entryIndex
+      (_, entryIndex) => entryIndex !== targetEntryIndex
     );
 
     return recalculateItem({
@@ -571,6 +688,18 @@ export async function finalizeInventory(inventoryId, userEmail = '') {
     finalizedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+}
+
+/**
+ * Alias de compatibilidad para la UI actual.
+ */
+export async function finalizeInventoryCount(
+  inventoryId,
+  _items = [],
+  _notes = '',
+  userEmail = ''
+) {
+  return finalizeInventory(inventoryId, userEmail);
 }
 
 /**
