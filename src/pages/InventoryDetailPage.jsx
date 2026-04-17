@@ -14,9 +14,6 @@ import {
   Search,
   Trash2,
   Plus,
-  ChevronDown,
-  ChevronUp,
-  Filter,
   X,
   Hash,
   Building2,
@@ -30,6 +27,7 @@ import {
   subscribeInventoryById,
 } from '../services/inventory';
 import CustomSelect from '../components/CustomSelect';
+import InventoryControlsMenu from '../components/InventoryControlsMenu';
 import { exportInventoryToPDF } from '../services/pdfExporter';
 
 function safeNumber(value) {
@@ -923,43 +921,15 @@ export default function InventoryDetailPage() {
                   )}
                 </div>
 
-                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                  <label className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-zinc-200">
-                    <Filter size={16} />
-                    <span>Solo contados</span>
-                    <input
-                      type="checkbox"
-                      checked={showOnlyCounted}
-                      onChange={(e) => setShowOnlyCounted(e.target.checked)}
-                      className="h-4 w-4 accent-blue-600"
-                    />
-                  </label>
-
-                  <CustomSelect
-                    value={sortMode}
-                    onChange={setSortMode}
-                    options={SORT_MODE_OPTIONS}
-                    className="min-w-[240px]"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={expandAll}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.06]"
-                  >
-                    <ChevronDown size={16} />
-                    Expandir todo
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={collapseAll}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.06]"
-                  >
-                    <ChevronUp size={16} />
-                    Contraer todo
-                  </button>
-                </div>
+                <InventoryControlsMenu
+                  sortMode={sortMode}
+                  onSortChange={setSortMode}
+                  sortOptions={SORT_MODE_OPTIONS}
+                  showOnlyCounted={showOnlyCounted}
+                  onToggleShowOnlyCounted={setShowOnlyCounted}
+                  onExpandAll={expandAll}
+                  onCollapseAll={collapseAll}
+                />
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
