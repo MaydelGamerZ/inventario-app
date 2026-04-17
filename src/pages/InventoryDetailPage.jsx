@@ -18,6 +18,8 @@ import {
   ChevronUp,
   Filter,
   X,
+  Hash,
+  Building2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -29,7 +31,7 @@ import {
 import { exportInventoryToPDF } from '../services/pdfExporter';
 
 function safeNumber(value) {
-  const parsed = Number(value);
+  const parsed = Number(String(value ?? '').replace(/,/g, '').trim());
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
@@ -41,6 +43,32 @@ function cleanText(value) {
   return String(value || '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function formatDateLabelFromKey(dateKey) {
+  if (!dateKey) return 'Sin fecha';
+
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const date = new Date(
+    year || new Date().getFullYear(),
+    (month || 1) - 1,
+    day || 1
+  );
+
+  return new Intl.DateTimeFormat('es-MX', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
+}
+
+function getInventoryDateLabel(inventory) {
+  return (
+    cleanText(inventory?.dateLabel) ||
+    cleanText(inventory?.date) ||
+    formatDateLabelFromKey(cleanText(inventory?.dateKey)) ||
+    'Sin fecha'
+  );
 }
 
 function summarizeEntries(entries = []) {
@@ -119,39 +147,40 @@ function buildItemTags(item) {
 function getTagClasses(label) {
   switch (String(label).toLowerCase()) {
     case 'buen estado':
-      return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
+      return 'border-emerald-900/60 bg-emerald-950/40 text-emerald-300';
     case 'caducado':
-      return 'border-orange-900/60 bg-orange-950/50 text-orange-400';
+      return 'border-orange-900/60 bg-orange-950/40 text-orange-300';
     case 'dañado':
+    case 'danado':
     case 'maltratado':
     case 'mojado':
       return 'border-zinc-700 bg-zinc-900 text-zinc-300';
     case 'exhibición':
     case 'exhibicion':
-      return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
+      return 'border-yellow-900/60 bg-yellow-950/40 text-yellow-300';
     case 'faltante':
-      return 'border-red-900/60 bg-red-950/50 text-red-400';
+      return 'border-red-900/60 bg-red-950/40 text-red-300';
     case 'sobrante':
-      return 'border-blue-900/60 bg-blue-950/50 text-blue-400';
+      return 'border-blue-900/60 bg-blue-950/40 text-blue-300';
     default:
-      return 'border-zinc-800 bg-zinc-900 text-zinc-300';
+      return 'border-white/10 bg-white/[0.03] text-zinc-300';
   }
 }
 
 function getStatusClasses(status) {
   switch (String(status || '').toUpperCase()) {
     case 'OK':
-      return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
+      return 'border-emerald-900/60 bg-emerald-950/40 text-emerald-300';
     case 'ALERTA':
-      return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
+      return 'border-yellow-900/60 bg-yellow-950/40 text-yellow-300';
     case 'CADUCADO':
-      return 'border-orange-900/60 bg-orange-950/50 text-orange-400';
+      return 'border-orange-900/60 bg-orange-950/40 text-orange-300';
     case 'DAÑADO':
       return 'border-zinc-700 bg-zinc-900 text-zinc-300';
     case 'FALTANTE':
-      return 'border-red-900/60 bg-red-950/50 text-red-400';
+      return 'border-red-900/60 bg-red-950/40 text-red-300';
     default:
-      return 'border-red-900/60 bg-red-950/50 text-red-400';
+      return 'border-white/10 bg-white/[0.03] text-zinc-300';
   }
 }
 
@@ -226,17 +255,26 @@ function groupItemsByCategory(items = [], sortMode = 'counted-first') {
   const map = new Map();
 
   for (const item of Array.isArray(items) ? items : []) {
-    const categoryName = cleanText(item?.categoryName) || 'Sin categoría';
+    const categoryName =
+      cleanText(item?.categoryRaw) ||
+      cleanText(item?.categoryName) ||
+      'Sin categoría';
 
-    if (!map.has(categoryName)) {
-      map.set(categoryName, {
-        id: categoryName,
+    const groupId = [
+      cleanText(item?.supplierCode),
+      cleanText(item?.categoryCode),
+      categoryName,
+    ].join('::');
+
+    if (!map.has(groupId)) {
+      map.set(groupId, {
+        id: groupId,
         name: categoryName,
         items: [],
       });
     }
 
-    map.get(categoryName).items.push(item);
+    map.get(groupId).items.push(item);
   }
 
   return Array.from(map.values())
@@ -257,9 +295,27 @@ function groupItemsByCategory(items = [], sortMode = 'counted-first') {
         ),
       };
     })
-    .sort((a, b) =>
-      a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
-    );
+    .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
+}
+
+function StatCard({ icon: Icon, title, value, iconClassName = 'text-zinc-300' }) {
+  return (
+    <div className="rounded-[24px] border border-white/10 bg-[#050505] p-4 sm:p-5">
+      <div className="flex items-start gap-3">
+        <div
+          className={`flex h-11 w-11 items-center justify-center rounded-2xl bg-white/[0.03] ${iconClassName}`}
+        >
+          <Icon size={20} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm text-zinc-400">{title}</p>
+          <h2 className="mt-2 break-words text-lg font-semibold text-white sm:text-2xl">
+            {value}
+          </h2>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function InventoryDetailPage() {
@@ -283,6 +339,14 @@ export default function InventoryDetailPage() {
   const [sortMode, setSortMode] = useState('counted-first');
   const [showOnlyCounted, setShowOnlyCounted] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState({});
+
+  const backTo =
+    location.state?.from === 'history' ? '/historial' : '/inventario-diario';
+
+  const backLabel =
+    location.state?.from === 'history'
+      ? 'Volver a historial de inventarios'
+      : 'Volver a inventario diario';
 
   useEffect(() => {
     if (!id) {
@@ -313,10 +377,11 @@ export default function InventoryDetailPage() {
 
   const stats = useMemo(() => {
     const items = Array.isArray(inventory?.items) ? inventory.items : [];
+    const grouped = groupItemsByCategory(items);
 
     return {
       totalProducts: items.length,
-      totalCategories: inventory?.categories?.length || 0,
+      totalCategories: inventory?.categories?.length || grouped.length || 0,
       ok: items.filter((i) => i.status === 'OK').length,
       alerta: items.filter((i) => i.status === 'ALERTA').length,
       faltante: items.filter((i) => i.status === 'FALTANTE').length,
@@ -368,18 +433,11 @@ export default function InventoryDetailPage() {
         .join(' ');
 
       return (
-        String(item?.productName || '')
-          .toLowerCase()
-          .includes(term) ||
-        String(item?.categoryName || '')
-          .toLowerCase()
-          .includes(term) ||
-        String(item?.supplierName || '')
-          .toLowerCase()
-          .includes(term) ||
-        String(item?.status || '')
-          .toLowerCase()
-          .includes(term) ||
+        String(item?.productName || '').toLowerCase().includes(term) ||
+        String(item?.categoryName || '').toLowerCase().includes(term) ||
+        String(item?.categoryRaw || '').toLowerCase().includes(term) ||
+        String(item?.supplierName || '').toLowerCase().includes(term) ||
+        String(item?.status || '').toLowerCase().includes(term) ||
         observationLabels.includes(term) ||
         entriesText.includes(term) ||
         String(item?.expectedQuantity ?? '').includes(term) ||
@@ -435,9 +493,7 @@ export default function InventoryDetailPage() {
 
     const itemIndex = getRealItemIndex(item);
     if (itemIndex < 0) {
-      setActionError(
-        'No se encontró el producto dentro del inventario actual.'
-      );
+      setActionError('No se encontró el producto dentro del inventario actual.');
       return;
     }
 
@@ -486,9 +542,7 @@ export default function InventoryDetailPage() {
 
     const itemIndex = getRealItemIndex(item);
     if (itemIndex < 0) {
-      setActionError(
-        'No se encontró el producto dentro del inventario actual.'
-      );
+      setActionError('No se encontró el producto dentro del inventario actual.');
       return;
     }
 
@@ -525,7 +579,9 @@ export default function InventoryDetailPage() {
       );
 
       setActionSuccess('Inventario guardado de forma final.');
-      navigate(`/inventario/${inventory.id}`);
+      navigate(`/inventario/${inventory.id}`, {
+        state: location.state || {},
+      });
     } catch (err) {
       console.error(err);
       setActionError(err?.message || 'No se pudo guardar el inventario.');
@@ -564,24 +620,24 @@ export default function InventoryDetailPage() {
 
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
+      <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 sm:p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
             <button
               type="button"
-              onClick={() => navigate('/inventario-diario')}
-              className="inline-flex items-center gap-2 rounded-2xl border border-zinc-700 bg-black px-4 py-2 text-sm font-medium text-white transition hover:border-zinc-500"
+              onClick={() => navigate(backTo)}
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.06]"
             >
               <ArrowLeft size={16} />
-              Volver a inventario diario
+              {backLabel}
             </button>
 
             <div>
-              <h1 className="text-3xl font-bold text-white sm:text-4xl">
+              <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
                 {isEditMode ? 'Continuar conteo' : 'Detalle de inventario'}
               </h1>
 
-              <p className="mt-2 text-sm leading-7 text-zinc-400 sm:text-base">
+              <p className="mt-2 text-sm leading-6 text-zinc-400 sm:text-base">
                 {isEditMode
                   ? 'Aquí puedes capturar conteos, observaciones y guardar el inventario final.'
                   : 'Aquí puedes revisar el detalle completo del inventario seleccionado.'}
@@ -589,11 +645,12 @@ export default function InventoryDetailPage() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row">
-            {inventory && !isEditMode && (
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {inventory && !isEditMode && inventory.status !== 'GUARDADO' && (
               <Link
                 to={`/inventario/${inventory.id}/editar`}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500"
+                state={location.state || {}}
+                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
               >
                 <Pencil size={18} />
                 Ir a edición
@@ -603,7 +660,8 @@ export default function InventoryDetailPage() {
             {inventory && isEditMode && (
               <Link
                 to={`/inventario/${inventory.id}`}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-black px-4 py-3 font-medium text-white transition hover:border-zinc-500"
+                state={location.state || {}}
+                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.06]"
               >
                 <Eye size={18} />
                 Ver detalle
@@ -614,7 +672,7 @@ export default function InventoryDetailPage() {
               <button
                 type="button"
                 onClick={() => exportInventoryToPDF(inventory)}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500"
+                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500"
               >
                 <Download size={18} />
                 Descargar
@@ -626,7 +684,7 @@ export default function InventoryDetailPage() {
                 type="button"
                 onClick={handleFinalize}
                 disabled={savingFinal}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500 disabled:opacity-60"
+                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-60"
               >
                 {savingFinal ? (
                   <Loader2 size={18} className="animate-spin" />
@@ -641,7 +699,7 @@ export default function InventoryDetailPage() {
       </section>
 
       {loading && (
-        <section className="rounded-2xl border border-zinc-800 bg-black px-4 py-8 text-zinc-400">
+        <section className="rounded-2xl border border-white/10 bg-black px-4 py-8 text-zinc-400">
           <div className="flex items-center gap-2">
             <Loader2 size={18} className="animate-spin" />
             Cargando inventario...
@@ -650,19 +708,19 @@ export default function InventoryDetailPage() {
       )}
 
       {!loading && error && (
-        <section className="rounded-2xl border border-red-900/60 bg-red-950/40 px-4 py-4 text-sm text-red-300">
+        <section className="rounded-2xl border border-red-900/60 bg-red-950/30 px-4 py-4 text-sm text-red-200">
           {error}
         </section>
       )}
 
       {!loading && actionError && (
-        <section className="rounded-2xl border border-red-900/60 bg-red-950/40 px-4 py-4 text-sm text-red-300">
+        <section className="rounded-2xl border border-red-900/60 bg-red-950/30 px-4 py-4 text-sm text-red-200">
           {actionError}
         </section>
       )}
 
       {!loading && actionSuccess && (
-        <section className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 px-4 py-4 text-sm text-emerald-300">
+        <section className="rounded-2xl border border-emerald-900/60 bg-emerald-950/30 px-4 py-4 text-sm text-emerald-200">
           {actionSuccess}
         </section>
       )}
@@ -670,108 +728,82 @@ export default function InventoryDetailPage() {
       {!loading && inventory && (
         <>
           {isEditMode && (
-            <section className="rounded-2xl border border-blue-900/60 bg-blue-950/30 px-4 py-4 text-sm text-blue-200">
-              Ya estás dentro de la ruta correcta de edición. Aquí sí puedes
-              contar.
+            <section className="rounded-2xl border border-blue-900/60 bg-blue-950/20 px-4 py-4 text-sm text-blue-200">
+              Ya estás en modo edición. Aquí sí puedes registrar conteos.
             </section>
           )}
 
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-blue-400">
-                  <CalendarDays size={22} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm text-zinc-400">Fecha</p>
-                  <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
-                    {inventory.date || 'Sin fecha'}
-                  </h2>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-emerald-400">
-                  <ClipboardList size={22} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm text-zinc-400">Estado</p>
-                  <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
-                    {inventory.status || 'Sin estado'}
-                  </h2>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-yellow-400">
-                  <Boxes size={22} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm text-zinc-400">Categorías</p>
-                  <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
-                    {stats.totalCategories}
-                  </h2>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-zinc-300">
-                  <Package size={22} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm text-zinc-400">Productos</p>
-                  <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
-                    {stats.totalProducts}
-                  </h2>
-                </div>
-              </div>
-            </div>
+            <StatCard
+              icon={CalendarDays}
+              title="Fecha"
+              value={getInventoryDateLabel(inventory)}
+              iconClassName="text-blue-400"
+            />
+            <StatCard
+              icon={ClipboardList}
+              title="Estado"
+              value={inventory.status || 'Sin estado'}
+              iconClassName="text-emerald-400"
+            />
+            <StatCard
+              icon={Boxes}
+              title="Categorías"
+              value={stats.totalCategories}
+              iconClassName="text-yellow-400"
+            />
+            <StatCard
+              icon={Package}
+              title="Productos"
+              value={stats.totalProducts}
+              iconClassName="text-zinc-300"
+            />
           </section>
 
-          <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
+          <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 sm:p-6">
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
-                <p className="text-sm text-zinc-400">Semana</p>
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
+                <div className="flex items-center gap-2 text-zinc-400">
+                  <Hash size={16} />
+                  <p className="text-sm">Semana</p>
+                </div>
                 <p className="mt-2 font-semibold text-white">
                   {inventory.week || 'Sin semana'}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4 sm:col-span-2 xl:col-span-2">
-                <p className="text-sm text-zinc-400">Cedis</p>
+              <div className="rounded-2xl border border-white/10 bg-black p-4 sm:col-span-2 xl:col-span-2">
+                <div className="flex items-center gap-2 text-zinc-400">
+                  <Building2 size={16} />
+                  <p className="text-sm">CEDIS</p>
+                </div>
                 <p className="mt-2 break-words font-semibold text-white">
                   {cleanCedisDisplay(inventory.cedis)}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
                 <p className="text-sm text-zinc-400">Stock esperado</p>
                 <p className="mt-2 font-semibold text-white">
                   {stats.totalStockEsperado.toLocaleString('es-MX')}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
                 <p className="text-sm text-zinc-400">No disponible</p>
                 <p className="mt-2 font-semibold text-white">
                   {stats.totalNoDisponible.toLocaleString('es-MX')}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
                 <p className="text-sm text-zinc-400">Productos contados</p>
                 <p className="mt-2 font-semibold text-white">
                   {stats.totalCountedProducts}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
                 <p className="text-sm text-zinc-400">Conteo físico total</p>
                 <p className="mt-2 font-semibold text-white">
                   {stats.totalConteoFisico.toLocaleString('es-MX')}
@@ -780,36 +812,36 @@ export default function InventoryDetailPage() {
             </div>
 
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 p-4">
-                <p className="text-sm text-emerald-400">OK</p>
-                <p className="mt-2 text-2xl font-bold text-white">{stats.ok}</p>
+              <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/30 p-4">
+                <p className="text-sm text-emerald-300">OK</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{stats.ok}</p>
               </div>
 
-              <div className="rounded-2xl border border-yellow-900/60 bg-yellow-950/40 p-4">
-                <p className="text-sm text-yellow-400">Alerta</p>
-                <p className="mt-2 text-2xl font-bold text-white">
+              <div className="rounded-2xl border border-yellow-900/60 bg-yellow-950/30 p-4">
+                <p className="text-sm text-yellow-300">Alerta</p>
+                <p className="mt-2 text-2xl font-semibold text-white">
                   {stats.alerta}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-red-900/60 bg-red-950/40 p-4">
-                <p className="text-sm text-red-400">Faltantes</p>
-                <p className="mt-2 text-2xl font-bold text-white">
+              <div className="rounded-2xl border border-red-900/60 bg-red-950/30 p-4">
+                <p className="text-sm text-red-300">Faltantes</p>
+                <p className="mt-2 text-2xl font-semibold text-white">
                   {stats.faltante}
                 </p>
               </div>
             </div>
 
-            <div className="mt-4 rounded-2xl border border-zinc-800 bg-black p-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 lg:flex-1">
+            <div className="mt-4 rounded-[26px] border border-white/10 bg-black p-4">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 xl:flex-1">
                   <Search size={18} className="shrink-0 text-zinc-500" />
                   <input
                     type="text"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Buscar producto, categoría, proveedor, observación o cantidad..."
-                    className="w-full bg-transparent text-white outline-none placeholder:text-zinc-500"
+                    className="w-full bg-transparent text-sm text-white outline-none placeholder:text-zinc-500"
                   />
                   {search && (
                     <button
@@ -822,8 +854,8 @@ export default function InventoryDetailPage() {
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-3">
-                  <label className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm text-zinc-200">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                  <label className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-zinc-200">
                     <Filter size={16} />
                     <span>Solo contados</span>
                     <input
@@ -837,21 +869,17 @@ export default function InventoryDetailPage() {
                   <select
                     value={sortMode}
                     onChange={(e) => setSortMode(e.target.value)}
-                    className="min-h-[44px] rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm text-white outline-none"
+                    className="min-h-[44px] rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-white outline-none"
                   >
-                    <option value="counted-first">
-                      Ordenar: contados primero
-                    </option>
-                    <option value="difference">
-                      Ordenar: mayor diferencia
-                    </option>
+                    <option value="counted-first">Ordenar: contados primero</option>
+                    <option value="difference">Ordenar: mayor diferencia</option>
                     <option value="name">Ordenar: nombre</option>
                   </select>
 
                   <button
                     type="button"
                     onClick={expandAll}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-900"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.06]"
                   >
                     <ChevronDown size={16} />
                     Expandir todo
@@ -860,7 +888,7 @@ export default function InventoryDetailPage() {
                   <button
                     type="button"
                     onClick={collapseAll}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-900"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.06]"
                   >
                     <ChevronUp size={16} />
                     Contraer todo
@@ -869,23 +897,23 @@ export default function InventoryDetailPage() {
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-sm text-zinc-400">Categorías visibles</p>
-                  <p className="mt-1 text-xl font-bold text-white">
+                  <p className="mt-1 text-xl font-semibold text-white">
                     {groupedFilteredItems.length}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-sm text-zinc-400">Productos visibles</p>
-                  <p className="mt-1 text-xl font-bold text-white">
+                  <p className="mt-1 text-xl font-semibold text-white">
                     {visibleProductsCount}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-sm text-zinc-400">Modo</p>
-                  <p className="mt-1 text-xl font-bold text-white">
+                  <p className="mt-1 text-xl font-semibold text-white">
                     {isEditMode ? 'Edición' : 'Consulta'}
                   </p>
                 </div>
@@ -894,7 +922,7 @@ export default function InventoryDetailPage() {
 
             <div className="mt-4 space-y-4">
               {groupedFilteredItems.length === 0 ? (
-                <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
+                <div className="rounded-2xl border border-white/10 bg-black px-4 py-6 text-zinc-400">
                   No hay productos que coincidan con la búsqueda.
                 </div>
               ) : (
@@ -904,26 +932,25 @@ export default function InventoryDetailPage() {
                   return (
                     <article
                       key={group.id}
-                      className="overflow-hidden rounded-3xl border border-zinc-800 bg-black"
+                      className="overflow-hidden rounded-[28px] border border-white/10 bg-black"
                     >
                       <button
                         type="button"
                         onClick={() => toggleCategory(group.id)}
-                        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-zinc-950 sm:px-5"
+                        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-white/[0.03] sm:px-5"
                       >
                         <div className="min-w-0">
-                          <h3 className="break-words text-base font-bold text-blue-400 sm:text-lg">
+                          <h3 className="break-words text-base font-semibold text-blue-400 sm:text-lg">
                             {group.name}
                           </h3>
                           <p className="mt-1 text-sm text-zinc-400">
                             {group.totalProducts} productos • Esperado:{' '}
-                            {group.totalExpected.toLocaleString('es-MX')} •
-                            Contado:{' '}
+                            {group.totalExpected.toLocaleString('es-MX')} • Contado:{' '}
                             {group.totalCounted.toLocaleString('es-MX')}
                           </p>
                         </div>
 
-                        <div className="shrink-0 rounded-2xl border border-zinc-800 bg-zinc-950 p-2 text-zinc-300">
+                        <div className="shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-2 text-zinc-300">
                           {isExpanded ? (
                             <ChevronUp size={18} />
                           ) : (
@@ -933,17 +960,13 @@ export default function InventoryDetailPage() {
                       </button>
 
                       {isExpanded && (
-                        <div className="border-t border-zinc-800 px-4 py-4 sm:px-5">
+                        <div className="border-t border-white/10 px-4 py-4 sm:px-5">
                           <div className="space-y-4">
                             {group.items.map((item, index) => {
                               const realIndex = getRealItemIndex(item);
-                              const itemKey = `${inventory.id}-${realIndex}-${cleanText(
-                                item?.productName || index
-                              )}`;
+                              const itemKey = `${inventory.id}-${realIndex}`;
                               const counted = getCountedQuantity(item);
-                              const expected = safeNumber(
-                                item.expectedQuantity
-                              );
+                              const expected = safeNumber(item.expectedQuantity);
                               const difference = counted - expected;
                               const tags = buildItemTags(item);
                               const draft = getDraft(itemKey);
@@ -951,14 +974,13 @@ export default function InventoryDetailPage() {
 
                               return (
                                 <div
-                                  key={itemKey}
-                                  className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4"
+                                  key={`${itemKey}-${cleanText(item?.productName || index)}`}
+                                  className="rounded-[24px] border border-white/10 bg-[#050505] p-4"
                                 >
                                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                                     <div className="min-w-0">
                                       <p className="break-words font-semibold text-white">
-                                        {item.productName ||
-                                          'Producto sin nombre'}
+                                        {item.productName || 'Producto sin nombre'}
                                       </p>
 
                                       <p className="mt-1 text-xs text-zinc-500">
@@ -975,9 +997,7 @@ export default function InventoryDetailPage() {
                                               )}`}
                                             >
                                               {tag.label} ·{' '}
-                                              {safeNumber(
-                                                tag.quantity
-                                              ).toLocaleString('es-MX')}
+                                              {safeNumber(tag.quantity).toLocaleString('es-MX')}
                                             </span>
                                           ))}
                                         </div>
@@ -994,7 +1014,7 @@ export default function InventoryDetailPage() {
                                   </div>
 
                                   <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                    <div className="rounded-xl border border-white/10 bg-black px-3 py-2">
                                       <span className="block text-xs text-zinc-500">
                                         Stock esperado
                                       </span>
@@ -1003,18 +1023,18 @@ export default function InventoryDetailPage() {
                                       </span>
                                     </div>
 
-                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                    <div className="rounded-xl border border-white/10 bg-black px-3 py-2">
                                       <span className="block text-xs text-zinc-500">
                                         No disponible
                                       </span>
                                       <span className="text-zinc-200">
-                                        {safeNumber(
-                                          item.unavailableQuantity
-                                        ).toLocaleString('es-MX')}
+                                        {safeNumber(item.unavailableQuantity).toLocaleString(
+                                          'es-MX'
+                                        )}
                                       </span>
                                     </div>
 
-                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                    <div className="rounded-xl border border-white/10 bg-black px-3 py-2">
                                       <span className="block text-xs text-zinc-500">
                                         Conteo físico
                                       </span>
@@ -1029,7 +1049,7 @@ export default function InventoryDetailPage() {
                                       </span>
                                     </div>
 
-                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                    <div className="rounded-xl border border-white/10 bg-black px-3 py-2">
                                       <span className="block text-xs text-zinc-500">
                                         Sobra
                                       </span>
@@ -1040,22 +1060,20 @@ export default function InventoryDetailPage() {
                                       </span>
                                     </div>
 
-                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                    <div className="rounded-xl border border-white/10 bg-black px-3 py-2">
                                       <span className="block text-xs text-zinc-500">
                                         Falta
                                       </span>
                                       <span className="text-red-300">
                                         {difference < 0
-                                          ? Math.abs(difference).toLocaleString(
-                                              'es-MX'
-                                            )
+                                          ? Math.abs(difference).toLocaleString('es-MX')
                                           : '0'}
                                       </span>
                                     </div>
                                   </div>
 
                                   {isEditMode && (
-                                    <div className="mt-4 rounded-2xl border border-zinc-800 bg-black p-4">
+                                    <div className="mt-4 rounded-2xl border border-white/10 bg-black p-4">
                                       <p className="mb-3 text-sm font-medium text-white">
                                         Agregar conteo
                                       </p>
@@ -1074,7 +1092,7 @@ export default function InventoryDetailPage() {
                                                 quantity: e.target.value,
                                               })
                                             }
-                                            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-blue-500"
+                                            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-white outline-none focus:border-blue-500"
                                             placeholder="Ej. 20"
                                           />
                                         </div>
@@ -1090,7 +1108,7 @@ export default function InventoryDetailPage() {
                                                 observationType: e.target.value,
                                               })
                                             }
-                                            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-blue-500"
+                                            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-white outline-none focus:border-blue-500"
                                           >
                                             <option>Buen estado</option>
                                             <option>Caducado</option>
@@ -1113,7 +1131,7 @@ export default function InventoryDetailPage() {
                                                 comment: e.target.value,
                                               })
                                             }
-                                            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white outline-none focus:border-blue-500"
+                                            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-white outline-none focus:border-blue-500"
                                             placeholder="Opcional"
                                           />
                                         </div>
@@ -1124,31 +1142,26 @@ export default function InventoryDetailPage() {
                                           type="button"
                                           onClick={() => handleAddEntry(item)}
                                           disabled={Boolean(busyAdd[itemKey])}
-                                          className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-500 disabled:opacity-60"
+                                          className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-60"
                                         >
                                           {busyAdd[itemKey] ? (
-                                            <Loader2
-                                              size={16}
-                                              className="animate-spin"
-                                            />
+                                            <Loader2 size={16} className="animate-spin" />
                                           ) : (
                                             <Plus size={16} />
                                           )}
-                                          {busyAdd[itemKey]
-                                            ? 'Agregando...'
-                                            : 'Agregar conteo'}
+                                          {busyAdd[itemKey] ? 'Agregando...' : 'Agregar conteo'}
                                         </button>
                                       </div>
                                     </div>
                                   )}
 
-                                  <div className="mt-4 rounded-2xl border border-zinc-800 bg-black p-4">
+                                  <div className="mt-4 rounded-2xl border border-white/10 bg-black p-4">
                                     <p className="mb-3 text-sm font-medium text-white">
                                       Conteos registrados
                                     </p>
 
                                     {entries.length === 0 ? (
-                                      <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950 px-3 py-3 text-sm text-zinc-500">
+                                      <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-zinc-500">
                                         Aún no hay conteos para este producto.
                                       </div>
                                     ) : (
@@ -1156,39 +1169,34 @@ export default function InventoryDetailPage() {
                                         {entries.map((entry) => (
                                           <div
                                             key={entry.id}
-                                            className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 lg:flex-row lg:items-center lg:justify-between"
+                                            className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 lg:flex-row lg:items-center lg:justify-between"
                                           >
                                             <div className="min-w-0">
                                               <div className="flex flex-wrap items-center gap-2">
                                                 <span
                                                   className={`inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-medium ${getTagClasses(
-                                                    entry?.observationType ||
-                                                      'Buen estado'
+                                                    entry?.observationType || 'Buen estado'
                                                   )}`}
                                                 >
-                                                  {entry?.observationType ||
-                                                    'Buen estado'}
+                                                  {entry?.observationType || 'Buen estado'}
                                                 </span>
 
                                                 <span className="text-sm font-semibold text-white">
-                                                  {safeNumber(
-                                                    entry.quantity
-                                                  ).toLocaleString('es-MX')}
+                                                  {safeNumber(entry.quantity).toLocaleString('es-MX')}
                                                 </span>
                                               </div>
 
                                               <p className="mt-2 text-xs text-zinc-400">
-                                                {entry.comment ||
-                                                  'Sin comentario'}
+                                                {entry.comment || 'Sin comentario'}
                                               </p>
 
                                               <p className="mt-1 text-xs text-zinc-600">
-                                                {entry.createdBy ||
-                                                  entry.createdByEmail ||
+                                                {entry.createdByEmail ||
+                                                  entry.createdBy ||
                                                   'Sin usuario'}{' '}
                                                 ·{' '}
-                                                {entry.createdAt ||
-                                                  entry.createdAtLabel ||
+                                                {entry.createdAtLabel ||
+                                                  entry.createdAt ||
                                                   'Sin fecha'}
                                               </p>
                                             </div>
@@ -1196,22 +1204,12 @@ export default function InventoryDetailPage() {
                                             {isEditMode && (
                                               <button
                                                 type="button"
-                                                onClick={() =>
-                                                  handleDeleteEntry(
-                                                    item,
-                                                    entry.id
-                                                  )
-                                                }
-                                                disabled={Boolean(
-                                                  busyDelete[entry.id]
-                                                )}
-                                                className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-xl border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-950/60 disabled:opacity-60"
+                                                onClick={() => handleDeleteEntry(item, entry.id)}
+                                                disabled={Boolean(busyDelete[entry.id])}
+                                                className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-xl border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-950/50 disabled:opacity-60"
                                               >
                                                 {busyDelete[entry.id] ? (
-                                                  <Loader2
-                                                    size={14}
-                                                    className="animate-spin"
-                                                  />
+                                                  <Loader2 size={14} className="animate-spin" />
                                                 ) : (
                                                   <Trash2 size={14} />
                                                 )}

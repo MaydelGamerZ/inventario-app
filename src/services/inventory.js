@@ -31,7 +31,11 @@ function safeArray(value) {
 }
 
 function safeNumber(value) {
-  const parsed = Number(value);
+  const parsed = Number(
+    String(value ?? '')
+      .replace(/,/g, '')
+      .trim()
+  );
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
@@ -75,10 +79,20 @@ function normalizeBoolean(value) {
   return Boolean(value);
 }
 
+function normalizeTimestampLike(value) {
+  if (!value) return null;
+  return value;
+}
+
 /* =========================
    ENTRIES / CONTEOS
 ========================= */
 function normalizeCountEntry(entry) {
+  const createdBy =
+    safeNullableString(entry?.createdByEmail) ||
+    safeNullableString(entry?.createdBy) ||
+    '';
+
   return {
     id: safeString(entry?.id) || buildEntryId(),
     quantity: Math.max(0, safeNumber(entry?.quantity)),
@@ -87,8 +101,10 @@ function normalizeCountEntry(entry) {
     createdAt:
       typeof entry?.createdAt === 'string' && entry.createdAt
         ? entry.createdAt
-        : new Date().toISOString(),
-    createdBy: safeNullableString(entry?.createdBy || entry?.createdByEmail),
+        : entry?.createdAt || new Date().toISOString(),
+    createdAtLabel: safeNullableString(entry?.createdAtLabel),
+    createdBy,
+    createdByEmail: createdBy,
   };
 }
 
@@ -124,7 +140,7 @@ function calculateItemStatus(item) {
   const observationTotals = summarizeEntriesByObservation(item?.countEntries);
 
   if (expected <= 0 && counted <= 0) return 'FALTANTE';
-  if (counted <= 0) return 'FALTANTE';
+  if (counted <= 0 && expected > 0) return 'FALTANTE';
   if ((observationTotals.Caducado || 0) > 0) return 'CADUCADO';
 
   if (
@@ -144,9 +160,16 @@ function calculateItemStatus(item) {
 
 function normalizeInventoryItem(item) {
   const countEntries = safeArray(item?.countEntries).map(normalizeCountEntry);
-  const countedQuantity = sumCountEntries(countEntries);
+  const countedQuantity =
+    countEntries.length > 0
+      ? sumCountEntries(countEntries)
+      : Math.max(0, safeNumber(item?.countedQuantity));
+
   const expectedQuantity = Math.max(0, safeNumber(item?.expectedQuantity));
-  const unavailableQuantity = Math.max(0, safeNumber(item?.unavailableQuantity));
+  const unavailableQuantity = Math.max(
+    0,
+    safeNumber(item?.unavailableQuantity)
+  );
   const difference = calculateDifference(expectedQuantity, countedQuantity);
 
   const normalized = {
@@ -167,12 +190,26 @@ function normalizeInventoryItem(item) {
     status: 'OK',
   };
 
-  normalized.status =
-    safeString(item?.status) || calculateItemStatus(normalized) || 'OK';
-
   normalized.status = calculateItemStatus(normalized);
 
   return normalized;
+}
+
+function normalizeInventoryCategory(category) {
+  return {
+    supplierCode: safeString(category?.supplierCode),
+    supplierName: safeString(category?.supplierName),
+    categoryCode: safeString(category?.categoryCode),
+    categoryName: safeString(category?.categoryName),
+    categoryRaw: safeString(category?.categoryRaw),
+    fullName:
+      safeString(category?.fullName) ||
+      safeString(category?.categoryRaw) ||
+      safeString(category?.categoryName),
+    itemCount: Math.max(0, safeNumber(category?.itemCount)),
+    quantityTotal: Math.max(0, safeNumber(category?.quantityTotal)),
+    noDisponibleTotal: Math.max(0, safeNumber(category?.noDisponibleTotal)),
+  };
 }
 
 function buildTotals(items = [], categories = []) {
@@ -194,11 +231,14 @@ function buildTotals(items = [], categories = []) {
 
 function normalizeInventoryPayload(data = {}, options = {}) {
   const items = safeArray(data?.items).map(normalizeInventoryItem);
-  const categories = safeArray(data?.categories);
+  const categories = safeArray(data?.categories).map(
+    normalizeInventoryCategory
+  );
   const totals = buildTotals(items, categories);
 
   const payload = {
-    date: safeString(data?.date),
+    date: safeString(data?.date) || safeString(data?.dateLabel),
+    dateLabel: safeString(data?.dateLabel) || safeString(data?.date),
     dateKey: safeString(data?.dateKey),
     week: safeString(data?.week),
     cedis: safeString(data?.cedis),
@@ -212,9 +252,9 @@ function normalizeInventoryPayload(data = {}, options = {}) {
     totals,
     countingStarted: normalizeBoolean(data?.countingStarted),
     countingFinished: normalizeBoolean(data?.countingFinished),
-    finalizedAt: data?.finalizedAt || null,
+    finalizedAt: normalizeTimestampLike(data?.finalizedAt),
     finalizedByEmail: safeNullableString(data?.finalizedByEmail),
-    lastCountUpdatedAt: data?.lastCountUpdatedAt || null,
+    lastCountUpdatedAt: normalizeTimestampLike(data?.lastCountUpdatedAt),
   };
 
   if (options.includeCreatedAt) {
@@ -228,6 +268,18 @@ function normalizeInventoryPayload(data = {}, options = {}) {
   }
 
   return payload;
+}
+
+function normalizeInventoryDoc(id, data = {}) {
+  const payload = normalizeInventoryPayload(data);
+
+  return {
+    id,
+    ...payload,
+    createdAt: data?.createdAt || null,
+    updatedAt: data?.updatedAt || null,
+    importedAt: data?.importedAt || null,
+  };
 }
 
 function isFinalStatus(status) {
@@ -301,12 +353,13 @@ export async function getAllInventories(options = {}) {
   const q = query(inventoriesRef, orderBy('dateKey', 'desc'));
   const snapshot = await getDocs(q);
 
-  const list = snapshot.docs.map((item) => ({
-    id: item.id,
-    ...item.data(),
-  }));
+  const list = snapshot.docs.map((item) =>
+    normalizeInventoryDoc(item.id, item.data())
+  );
 
-  return includeDrafts ? list : list.filter((inv) => isFinalStatus(inv?.status));
+  return includeDrafts
+    ? list
+    : list.filter((inv) => isFinalStatus(inv?.status));
 }
 
 export async function getInventoryById(inventoryId) {
@@ -320,10 +373,7 @@ export async function getInventoryById(inventoryId) {
     return null;
   }
 
-  return {
-    id: snapshot.id,
-    ...snapshot.data(),
-  };
+  return normalizeInventoryDoc(snapshot.id, snapshot.data());
 }
 
 export async function getInventoryByDate(dateKey) {
@@ -333,6 +383,7 @@ export async function getInventoryByDate(dateKey) {
   const q = query(
     inventoriesRef,
     where('dateKey', '==', normalizedDateKey),
+    orderBy('updatedAt', 'desc'),
     limit(1)
   );
 
@@ -343,11 +394,7 @@ export async function getInventoryByDate(dateKey) {
   }
 
   const firstDoc = snapshot.docs[0];
-
-  return {
-    id: firstDoc.id,
-    ...firstDoc.data(),
-  };
+  return normalizeInventoryDoc(firstDoc.id, firstDoc.data());
 }
 
 export async function createInventory(data) {
@@ -410,6 +457,7 @@ export async function saveDailyInventoryFromPdf(
 
   const payload = {
     date: safeString(parsedInventory?.dateLabel),
+    dateLabel: safeString(parsedInventory?.dateLabel),
     dateKey,
     week: safeString(parsedInventory?.week),
     cedis: safeString(parsedInventory?.cedis),
@@ -469,6 +517,7 @@ export async function addInventoryCountEntry(
         normalizeCountEntry({
           ...entry,
           createdBy: safeString(actorEmail),
+          createdByEmail: safeString(actorEmail),
         }),
       ];
 
@@ -505,17 +554,21 @@ export async function updateInventoryCountEntry(
     currentInventory?.items,
     itemIndex,
     (normalizedItem) => {
-      const nextEntries = safeArray(normalizedItem?.countEntries).map((entry) => {
-        if (safeString(entry?.id) !== normalizedEntryId) {
-          return entry;
-        }
+      const nextEntries = safeArray(normalizedItem?.countEntries).map(
+        (entry) => {
+          if (safeString(entry?.id) !== normalizedEntryId) {
+            return entry;
+          }
 
-        return normalizeCountEntry({
-          ...entry,
-          ...updates,
-          createdBy: safeString(actorEmail) || safeString(entry?.createdBy),
-        });
-      });
+          return normalizeCountEntry({
+            ...entry,
+            ...updates,
+            createdBy: safeString(actorEmail) || safeString(entry?.createdBy),
+            createdByEmail:
+              safeString(actorEmail) || safeString(entry?.createdByEmail),
+          });
+        }
+      );
 
       return {
         ...normalizedItem,
@@ -587,6 +640,8 @@ export async function replaceInventoryItemEntries(
         normalizeCountEntry({
           ...entry,
           createdBy: safeString(entry?.createdBy) || safeString(actorEmail),
+          createdByEmail:
+            safeString(entry?.createdByEmail) || safeString(actorEmail),
         })
       );
 
@@ -609,11 +664,7 @@ export async function replaceInventoryItemEntries(
   return await getInventoryById(inventoryId);
 }
 
-export async function saveInventoryDetailDraft(
-  inventoryId,
-  items,
-  notes = ''
-) {
+export async function saveInventoryDetailDraft(inventoryId, items, notes = '') {
   const currentInventory = await getInventoryDocOrThrow(inventoryId);
   const normalizedItems = safeArray(items).map(normalizeInventoryItem);
 
@@ -665,10 +716,9 @@ export function subscribeAllInventories(callback, options = {}) {
   return onSnapshot(
     q,
     (snapshot) => {
-      let inventories = snapshot.docs.map((docItem) => ({
-        id: docItem.id,
-        ...docItem.data(),
-      }));
+      let inventories = snapshot.docs.map((docItem) =>
+        normalizeInventoryDoc(docItem.id, docItem.data())
+      );
 
       if (!includeDrafts) {
         inventories = inventories.filter((inv) => isFinalStatus(inv?.status));
@@ -701,10 +751,7 @@ export function subscribeInventoryById(inventoryId, callback) {
         return;
       }
 
-      callback({
-        id: snapshot.id,
-        ...snapshot.data(),
-      });
+      callback(normalizeInventoryDoc(snapshot.id, snapshot.data()));
     },
     (error) => {
       console.error('Error en subscribeInventoryById:', error);
@@ -724,6 +771,7 @@ export function subscribeInventoryByDate(dateKey, callback) {
   const q = query(
     inventoriesRef,
     where('dateKey', '==', normalizedDateKey),
+    orderBy('updatedAt', 'desc'),
     limit(1)
   );
 
@@ -736,11 +784,7 @@ export function subscribeInventoryByDate(dateKey, callback) {
       }
 
       const docSnapshot = snapshot.docs[0];
-
-      callback({
-        id: docSnapshot.id,
-        ...docSnapshot.data(),
-      });
+      callback(normalizeInventoryDoc(docSnapshot.id, docSnapshot.data()));
     },
     (error) => {
       console.error('Error en subscribeInventoryByDate:', error);

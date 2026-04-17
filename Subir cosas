@@ -2,4 +2,7 @@ git add .
 git commit -m "Corregido"
 git push origin main 
 
-.
+src/layouts/AppLayout.jsx
+src/components/layout/AppShell.jsx
+src/components/Sidebar.jsx
+src/components/layout/DashboardLayout.jsx

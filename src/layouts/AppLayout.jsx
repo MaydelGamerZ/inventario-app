@@ -5,6 +5,7 @@ import Sidebar from '../components/Sidebar';
 
 const DESKTOP_EXPANDED_WIDTH = 290;
 const DESKTOP_COLLAPSED_WIDTH = 92;
+const MOBILE_HEADER_HEIGHT = 64;
 
 export default function AppLayout() {
   const location = useLocation();
@@ -16,17 +17,29 @@ export default function AppLayout() {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  const desktopSidebarPaddingClass = useMemo(() => {
+  const desktopSidebarWidth = useMemo(() => {
     return desktopCollapsed
-      ? `lg:pl-[${DESKTOP_COLLAPSED_WIDTH}px]`
-      : `lg:pl-[${DESKTOP_EXPANDED_WIDTH}px]`;
+      ? DESKTOP_COLLAPSED_WIDTH
+      : DESKTOP_EXPANDED_WIDTH;
   }, [desktopCollapsed]);
 
-  const desktopToggleLeftClass = useMemo(() => {
-    return desktopCollapsed
-      ? `left-[${DESKTOP_COLLAPSED_WIDTH}px]`
-      : `left-[${DESKTOP_EXPANDED_WIDTH}px]`;
-  }, [desktopCollapsed]);
+  const mainStyle = useMemo(() => {
+    return {
+      paddingLeft: 0,
+    };
+  }, []);
+
+  const desktopMainStyle = useMemo(() => {
+    return {
+      paddingLeft: `${desktopSidebarWidth}px`,
+    };
+  }, [desktopSidebarWidth]);
+
+  const desktopToggleStyle = useMemo(() => {
+    return {
+      left: `${desktopSidebarWidth - 16}px`,
+    };
+  }, [desktopSidebarWidth]);
 
   const handleOpenMobileMenu = () => {
     setMobileOpen(true);
@@ -41,32 +54,53 @@ export default function AppLayout() {
   };
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-black text-white">
+    <div className="min-h-screen bg-black text-white">
       {/* Header móvil */}
       <header
         className="
-          sticky top-0 z-40 flex min-h-[56px] items-center justify-between
-          border-b border-zinc-800 bg-black/95 backdrop-blur lg:hidden
-          px-4
+          sticky top-0 z-40 lg:hidden
+          border-b border-white/10
+          bg-black/95 backdrop-blur-xl
           pt-[env(safe-area-inset-top)]
-          pl-[max(1rem,env(safe-area-inset-left))]
-          pr-[max(1rem,env(safe-area-inset-right))]
         "
       >
-        <button
-          type="button"
-          onClick={handleOpenMobileMenu}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-950 text-zinc-200 transition hover:bg-zinc-900 hover:text-white active:scale-[0.98]"
-          aria-label="Abrir menú"
+        <div
+          className="
+            flex items-center justify-between
+            px-3
+            pl-[max(0.75rem,env(safe-area-inset-left))]
+            pr-[max(0.75rem,env(safe-area-inset-right))]
+          "
+          style={{ minHeight: `${MOBILE_HEADER_HEIGHT}px` }}
         >
-          <Menu size={20} />
-        </button>
+          <button
+            type="button"
+            onClick={handleOpenMobileMenu}
+            className="
+              inline-flex h-11 w-11 items-center justify-center
+              rounded-2xl border border-white/10
+              bg-zinc-950 text-zinc-100
+              shadow-[0_8px_30px_rgba(0,0,0,0.35)]
+              transition
+              hover:bg-zinc-900
+              active:scale-[0.98]
+            "
+            aria-label="Abrir menú"
+          >
+            <Menu size={20} />
+          </button>
 
-        <h1 className="max-w-[180px] truncate text-lg font-bold tracking-tight">
-          INVENTARIO
-        </h1>
+          <div className="min-w-0 flex-1 px-3 text-center">
+            <p className="truncate text-[11px] font-medium uppercase tracking-[0.22em] text-zinc-500">
+              Sistema de inventario
+            </p>
+            <h1 className="truncate text-base font-semibold tracking-tight text-white">
+              Panel principal
+            </h1>
+          </div>
 
-        <div className="w-10" />
+          <div className="h-11 w-11 shrink-0" />
+        </div>
       </header>
 
       {/* Sidebar escritorio */}
@@ -82,20 +116,22 @@ export default function AppLayout() {
         <button
           type="button"
           onClick={handleToggleDesktopSidebar}
-          className={`
-            fixed top-6 z-[60] hidden rounded-xl border border-zinc-700
-            bg-zinc-950 p-2 text-zinc-300 shadow-lg transition
-            hover:bg-zinc-900 hover:text-white active:scale-[0.98]
-            lg:flex ${desktopToggleLeftClass}
-          `}
+          style={desktopToggleStyle}
+          className="
+            fixed top-5 z-[70] hidden lg:inline-flex
+            h-11 w-11 items-center justify-center
+            rounded-2xl border border-white/10
+            bg-zinc-950/95 text-zinc-300
+            shadow-[0_12px_35px_rgba(0,0,0,0.45)]
+            backdrop-blur
+            transition
+            hover:bg-zinc-900 hover:text-white
+            active:scale-[0.98]
+          "
           aria-label={desktopCollapsed ? 'Expandir menú' : 'Colapsar menú'}
           title={desktopCollapsed ? 'Expandir menú' : 'Colapsar menú'}
         >
-          {desktopCollapsed ? (
-            <ChevronRight size={18} />
-          ) : (
-            <ChevronLeft size={18} />
-          )}
+          {desktopCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
         </button>
       </div>
 
@@ -111,24 +147,34 @@ export default function AppLayout() {
 
       {/* Contenido */}
       <main
-        className={`
-          min-h-[calc(100dvh-56px)] lg:min-h-screen
-          transition-[padding] duration-300 ease-out
-          ${desktopSidebarPaddingClass}
-        `}
+        style={mainStyle}
+        className="
+          min-h-[calc(100dvh-64px-env(safe-area-inset-top))]
+          lg:min-h-screen
+          transition-all duration-300 ease-out
+        "
       >
+        <div style={desktopMainStyle} className="hidden lg:block" />
+
         <div
           className="
-            mx-auto w-full max-w-7xl
+            mx-auto w-full max-w-screen-2xl
             px-3 py-3
-            sm:px-6 sm:py-6
+            sm:px-5 sm:py-5
             lg:px-8 lg:py-8
             pb-[max(1rem,env(safe-area-inset-bottom))]
             pl-[max(0.75rem,env(safe-area-inset-left))]
             pr-[max(0.75rem,env(safe-area-inset-right))]
           "
         >
-          <Outlet />
+          <div
+            className="
+              w-full min-w-0
+              rounded-[28px]
+            "
+          >
+            <Outlet />
+          </div>
         </div>
       </main>
     </div>

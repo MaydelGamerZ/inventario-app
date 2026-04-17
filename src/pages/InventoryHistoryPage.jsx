@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   Clock3,
   FileWarning,
+  Hash,
 } from 'lucide-react';
 import { subscribeAllInventories } from '../services/inventory';
 import { exportInventoryToPDF } from '../services/pdfExporter';
@@ -29,12 +30,18 @@ function getTodayDateKey() {
 }
 
 function safeNumber(value) {
-  const parsed = Number(value);
+  const parsed = Number(
+    String(value ?? '')
+      .replace(/,/g, '')
+      .trim()
+  );
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 function cleanText(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function formatDate(dateValue) {
@@ -63,6 +70,15 @@ function formatDate(dateValue) {
   }).format(parsed);
 }
 
+function getInventoryDateLabel(inv) {
+  return (
+    cleanText(inv?.dateLabel) ||
+    cleanText(inv?.date) ||
+    formatDate(cleanText(inv?.dateKey)) ||
+    'Sin fecha'
+  );
+}
+
 function getCountEntries(item) {
   return Array.isArray(item?.countEntries) ? item.countEntries : [];
 }
@@ -83,7 +99,9 @@ function hasStartedCount(inv) {
   const items = Array.isArray(inv?.items) ? inv.items : [];
 
   return items.some((item) => {
-    return getCountEntries(item).length > 0 || safeNumber(item?.countedQuantity) > 0;
+    return (
+      getCountEntries(item).length > 0 || safeNumber(item?.countedQuantity) > 0
+    );
   });
 }
 
@@ -101,17 +119,17 @@ function getInventoryStatus(inv) {
 function getStatusBadgeClasses(status) {
   switch (status) {
     case 'GUARDADO':
-      return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
+      return 'border-emerald-900/60 bg-emerald-950/40 text-emerald-300';
     case 'CONTEO INICIADO':
-      return 'border-blue-900/60 bg-blue-950/50 text-blue-300';
+      return 'border-blue-900/60 bg-blue-950/40 text-blue-300';
     case 'BORRADOR':
-      return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
+      return 'border-yellow-900/60 bg-yellow-950/40 text-yellow-300';
     case 'PENDIENTE':
-      return 'border-orange-900/60 bg-orange-950/50 text-orange-300';
+      return 'border-orange-900/60 bg-orange-950/40 text-orange-300';
     case 'VACÍO':
-      return 'border-zinc-800 bg-zinc-900 text-zinc-300';
+      return 'border-white/10 bg-white/[0.03] text-zinc-300';
     default:
-      return 'border-zinc-800 bg-zinc-900 text-zinc-300';
+      return 'border-white/10 bg-white/[0.03] text-zinc-300';
   }
 }
 
@@ -140,7 +158,9 @@ function getInventorySummary(inv) {
     (sum, item) => sum + getCountedQuantity(item),
     0
   );
-  const countedProducts = items.filter((item) => getCountedQuantity(item) > 0).length;
+  const countedProducts = items.filter(
+    (item) => getCountedQuantity(item) > 0
+  ).length;
 
   return {
     totalProducts,
@@ -148,6 +168,15 @@ function getInventorySummary(inv) {
     totalCounted,
     countedProducts,
   };
+}
+
+function StatCard({ title, value }) {
+  return (
+    <div className="rounded-[24px] border border-white/10 bg-[#050505] p-4 sm:p-5">
+      <p className="text-sm text-zinc-400">{title}</p>
+      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+    </div>
+  );
 }
 
 export default function InventoryHistoryPage() {
@@ -162,11 +191,14 @@ export default function InventoryHistoryPage() {
   useEffect(() => {
     setLoading(true);
 
-    const unsubscribe = subscribeAllInventories((list) => {
-      const normalized = Array.isArray(list) ? list : [];
-      setInventories(normalized);
-      setLoading(false);
-    });
+    const unsubscribe = subscribeAllInventories(
+      (list) => {
+        const normalized = Array.isArray(list) ? list : [];
+        setInventories(normalized);
+        setLoading(false);
+      },
+      { includeDrafts: true }
+    );
 
     return () => unsubscribe?.();
   }, []);
@@ -176,6 +208,7 @@ export default function InventoryHistoryPage() {
       .map((inv) => {
         const status = getInventoryStatus(inv);
         const summary = getInventorySummary(inv);
+
         return {
           ...inv,
           _computedStatus: status,
@@ -194,14 +227,22 @@ export default function InventoryHistoryPage() {
       const started = status === 'CONTEO INICIADO';
 
       if (filterMode === 'saved' && status !== 'GUARDADO') return false;
-      if (filterMode === 'draft' && status !== 'BORRADOR' && status !== 'PENDIENTE')
+
+      if (
+        filterMode === 'draft' &&
+        status !== 'BORRADOR' &&
+        status !== 'PENDIENTE'
+      ) {
         return false;
+      }
+
       if (filterMode === 'today' && !isToday) return false;
       if (filterMode === 'started' && !started) return false;
 
       if (!term) return true;
 
       const searchable = [
+        inv?.dateLabel,
         inv?.date,
         inv?.dateKey,
         inv?.week,
@@ -246,17 +287,17 @@ export default function InventoryHistoryPage() {
 
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
+      <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 sm:p-6">
         <div className="flex items-start gap-4">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-zinc-900 text-blue-400">
-            <History size={24} />
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/[0.03] text-blue-400 sm:h-14 sm:w-14">
+            <History size={22} />
           </div>
 
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-white sm:text-3xl">
+            <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
               Historial de Inventarios
             </h1>
-            <p className="mt-2 max-w-3xl text-sm leading-7 text-zinc-400 sm:text-base">
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400 sm:text-base">
               Aquí verás todos los inventarios, con acceso rápido a detalle,
               edición cuando aplique y descarga en PDF.
             </p>
@@ -265,35 +306,17 @@ export default function InventoryHistoryPage() {
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <p className="text-sm text-zinc-400">Inventarios totales</p>
-          <p className="mt-2 text-2xl font-bold text-white">{stats.total}</p>
-        </div>
-
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <p className="text-sm text-zinc-400">Inventarios de hoy</p>
-          <p className="mt-2 text-2xl font-bold text-white">{stats.today}</p>
-        </div>
-
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <p className="text-sm text-zinc-400">Conteo iniciado</p>
-          <p className="mt-2 text-2xl font-bold text-white">{stats.withCounts}</p>
-        </div>
-
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <p className="text-sm text-zinc-400">Guardados finales</p>
-          <p className="mt-2 text-2xl font-bold text-white">{stats.saved}</p>
-        </div>
-
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <p className="text-sm text-zinc-400">Productos acumulados</p>
-          <p className="mt-2 text-2xl font-bold text-white">
-            {stats.totalProducts.toLocaleString('es-MX')}
-          </p>
-        </div>
+        <StatCard title="Inventarios totales" value={stats.total} />
+        <StatCard title="Inventarios de hoy" value={stats.today} />
+        <StatCard title="Conteo iniciado" value={stats.withCounts} />
+        <StatCard title="Guardados finales" value={stats.saved} />
+        <StatCard
+          title="Productos acumulados"
+          value={stats.totalProducts.toLocaleString('es-MX')}
+        />
       </section>
 
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 md:p-5">
+      <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 md:p-5">
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="relative w-full md:max-w-xl">
@@ -306,7 +329,7 @@ export default function InventoryHistoryPage() {
                 placeholder="Buscar por fecha, semana, cedis, usuario, nota o estado..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-2xl border border-zinc-800 bg-black/50 py-3 pl-11 pr-11 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-blue-500"
+                className="w-full rounded-2xl border border-white/10 bg-black/50 py-3 pl-11 pr-11 text-sm text-white outline-none transition placeholder:text-zinc-500 focus:border-blue-500"
               />
               {search && (
                 <button
@@ -327,7 +350,7 @@ export default function InventoryHistoryPage() {
               className={`inline-flex min-h-[40px] items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-medium transition ${
                 filterMode === 'all'
                   ? 'border-blue-700 bg-blue-600 text-white'
-                  : 'border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800'
+                  : 'border-white/10 bg-white/[0.03] text-zinc-200 hover:bg-white/[0.06]'
               }`}
             >
               <Filter size={16} />
@@ -340,7 +363,7 @@ export default function InventoryHistoryPage() {
               className={`inline-flex min-h-[40px] items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-medium transition ${
                 filterMode === 'saved'
                   ? 'border-emerald-700 bg-emerald-600 text-white'
-                  : 'border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800'
+                  : 'border-white/10 bg-white/[0.03] text-zinc-200 hover:bg-white/[0.06]'
               }`}
             >
               <CheckCircle2 size={16} />
@@ -353,7 +376,7 @@ export default function InventoryHistoryPage() {
               className={`inline-flex min-h-[40px] items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-medium transition ${
                 filterMode === 'draft'
                   ? 'border-yellow-700 bg-yellow-600 text-white'
-                  : 'border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800'
+                  : 'border-white/10 bg-white/[0.03] text-zinc-200 hover:bg-white/[0.06]'
               }`}
             >
               <Clock3 size={16} />
@@ -366,7 +389,7 @@ export default function InventoryHistoryPage() {
               className={`inline-flex min-h-[40px] items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-medium transition ${
                 filterMode === 'today'
                   ? 'border-blue-700 bg-blue-600 text-white'
-                  : 'border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800'
+                  : 'border-white/10 bg-white/[0.03] text-zinc-200 hover:bg-white/[0.06]'
               }`}
             >
               <CalendarDays size={16} />
@@ -379,7 +402,7 @@ export default function InventoryHistoryPage() {
               className={`inline-flex min-h-[40px] items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-medium transition ${
                 filterMode === 'started'
                   ? 'border-blue-700 bg-blue-600 text-white'
-                  : 'border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800'
+                  : 'border-white/10 bg-white/[0.03] text-zinc-200 hover:bg-white/[0.06]'
               }`}
             >
               <ClipboardList size={16} />
@@ -390,27 +413,27 @@ export default function InventoryHistoryPage() {
       </section>
 
       {loading ? (
-        <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-8 text-center">
+        <section className="rounded-[28px] border border-white/10 bg-[#050505] p-8 text-center">
           <div className="flex items-center justify-center gap-3 text-zinc-400">
             <Loader2 size={18} className="animate-spin" />
             <p>Cargando inventarios...</p>
           </div>
         </section>
       ) : filteredInventories.length === 0 ? (
-        <section className="rounded-3xl border border-dashed border-zinc-800 bg-zinc-950 p-8 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900">
+        <section className="rounded-[28px] border border-dashed border-white/10 bg-[#050505] p-8 text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
             <FileWarning className="text-zinc-400" size={26} />
           </div>
 
           <h2 className="mt-4 text-xl font-semibold text-white">
             {inventories.length === 0
-              ? 'No hay inventarios guardados'
+              ? 'No hay inventarios todavía'
               : 'No hubo coincidencias en la búsqueda'}
           </h2>
 
           <p className="mx-auto mt-2 max-w-2xl text-sm text-zinc-400 md:text-base">
             {inventories.length === 0
-              ? 'Aquí aparecerán los inventarios cuando los guardes desde Inventario Diario.'
+              ? 'Aquí aparecerán los inventarios cuando los cargues o guardes desde Inventario Diario.'
               : 'Prueba con otra fecha, cedis, semana, estado o palabra clave.'}
           </p>
         </section>
@@ -421,20 +444,18 @@ export default function InventoryHistoryPage() {
             const inventoryStatus = inv._computedStatus;
             const summary = inv._summary;
             const canEdit =
-              isToday &&
-              inventoryStatus !== 'GUARDADO' &&
-              inventoryStatus !== 'VACÍO';
+              inventoryStatus !== 'GUARDADO' && inventoryStatus !== 'VACÍO';
 
             return (
               <article
                 key={inv.id}
-                className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 transition hover:border-zinc-700 md:p-5"
+                className="rounded-[28px] border border-white/10 bg-[#050505] p-4 transition hover:border-white/20 md:p-5"
               >
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="text-lg font-semibold text-white md:text-xl">
-                        {formatDate(inv?.date || inv?.dateKey)}
+                        {getInventoryDateLabel(inv)}
                       </h2>
 
                       <span className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300">
@@ -450,7 +471,7 @@ export default function InventoryHistoryPage() {
                       </span>
 
                       {isToday && (
-                        <span className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-xs font-medium text-zinc-200">
+                        <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-medium text-zinc-200">
                           Hoy
                         </span>
                       )}
@@ -459,19 +480,21 @@ export default function InventoryHistoryPage() {
                     <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-400 md:flex-row md:flex-wrap md:items-center md:gap-4">
                       {inv?.week && (
                         <span className="inline-flex items-center gap-2">
-                          <CalendarDays size={16} />
+                          <Hash size={16} />
                           Semana {inv.week}
                         </span>
                       )}
 
                       <span className="inline-flex items-center gap-2">
                         <ClipboardList size={16} />
-                        {summary.totalProducts.toLocaleString('es-MX')} productos
+                        {summary.totalProducts.toLocaleString('es-MX')}{' '}
+                        productos
                       </span>
 
                       <span className="inline-flex items-center gap-2">
                         <Package size={16} />
-                        Conteo físico: {summary.totalCounted.toLocaleString('es-MX')}
+                        Conteo físico:{' '}
+                        {summary.totalCounted.toLocaleString('es-MX')}
                       </span>
 
                       {inv?.importedByEmail && (
@@ -483,8 +506,8 @@ export default function InventoryHistoryPage() {
                     </div>
 
                     <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3">
-                        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                      <div className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3">
+                        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">
                           Stock esperado
                         </p>
                         <p className="mt-1 text-sm font-semibold text-white">
@@ -492,8 +515,8 @@ export default function InventoryHistoryPage() {
                         </p>
                       </div>
 
-                      <div className="rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3">
-                        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                      <div className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3">
+                        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">
                           Conteo físico
                         </p>
                         <p className="mt-1 text-sm font-semibold text-white">
@@ -501,8 +524,8 @@ export default function InventoryHistoryPage() {
                         </p>
                       </div>
 
-                      <div className="rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3">
-                        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                      <div className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3">
+                        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">
                           Productos contados
                         </p>
                         <p className="mt-1 text-sm font-semibold text-white">
@@ -512,8 +535,8 @@ export default function InventoryHistoryPage() {
                     </div>
 
                     {inv?.notes && (
-                      <div className="mt-3 rounded-2xl border border-zinc-800 bg-black/40 px-4 py-3">
-                        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                      <div className="mt-3 rounded-2xl border border-white/10 bg-black/40 px-4 py-3">
+                        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">
                           Nota
                         </p>
                         <p className="mt-1 break-words text-sm text-zinc-300">
@@ -525,8 +548,12 @@ export default function InventoryHistoryPage() {
 
                   <div className="flex flex-col gap-2 sm:flex-row xl:mt-0">
                     <button
-                      onClick={() => navigate(`/inventario/${inv.id}`)}
-                      className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-zinc-800"
+                      onClick={() =>
+                        navigate(`/inventario/${inv.id}`, {
+                          state: { from: 'history' },
+                        })
+                      }
+                      className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-medium text-white transition hover:bg-white/[0.06]"
                     >
                       <Eye size={16} />
                       Ver detalle
@@ -534,7 +561,11 @@ export default function InventoryHistoryPage() {
 
                     {canEdit && (
                       <button
-                        onClick={() => navigate(`/inventario/${inv.id}/editar`)}
+                        onClick={() =>
+                          navigate(`/inventario/${inv.id}/editar`, {
+                            state: { from: 'history' },
+                          })
+                        }
                         className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-500"
                       >
                         <Pencil size={16} />

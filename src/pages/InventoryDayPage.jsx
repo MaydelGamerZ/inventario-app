@@ -25,6 +25,8 @@ import {
   Filter,
   RefreshCw,
   FileText,
+  Building2,
+  Hash,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { parseInventoryPdf } from '../services/pdfInventoryParser';
@@ -62,14 +64,27 @@ function formatDateLabelFromKey(dateKey) {
 }
 
 function safeNumber(value) {
-  const parsed = Number(value);
-  return Number.isNaN(parsed) ? 0 : parsed;
+  const parsed = Number(
+    String(value ?? '')
+      .replace(/,/g, '')
+      .trim()
+  );
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function cleanText(value) {
   return String(value || '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function getInventoryDateLabel(inventory) {
+  return (
+    cleanText(inventory?.dateLabel) ||
+    cleanText(inventory?.date) ||
+    formatDateLabelFromKey(cleanText(inventory?.dateKey)) ||
+    'Sin fecha'
+  );
 }
 
 function summarizeEntries(entries = []) {
@@ -148,39 +163,40 @@ function buildItemTags(item) {
 function getTagClasses(label) {
   switch (String(label).toLowerCase()) {
     case 'buen estado':
-      return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
+      return 'border-emerald-900/60 bg-emerald-950/40 text-emerald-300';
     case 'caducado':
-      return 'border-orange-900/60 bg-orange-950/50 text-orange-400';
+      return 'border-orange-900/60 bg-orange-950/40 text-orange-300';
     case 'dañado':
+    case 'danado':
     case 'maltratado':
     case 'mojado':
       return 'border-zinc-700 bg-zinc-900 text-zinc-300';
     case 'exhibición':
     case 'exhibicion':
-      return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
+      return 'border-yellow-900/60 bg-yellow-950/40 text-yellow-300';
     case 'faltante':
-      return 'border-red-900/60 bg-red-950/50 text-red-400';
+      return 'border-red-900/60 bg-red-950/40 text-red-300';
     case 'sobrante':
-      return 'border-blue-900/60 bg-blue-950/50 text-blue-400';
+      return 'border-blue-900/60 bg-blue-950/40 text-blue-300';
     default:
-      return 'border-zinc-800 bg-zinc-900 text-zinc-300';
+      return 'border-white/10 bg-white/[0.03] text-zinc-300';
   }
 }
 
 function getItemStatusClasses(status) {
   switch (String(status || '').toUpperCase()) {
     case 'OK':
-      return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
+      return 'border-emerald-900/60 bg-emerald-950/40 text-emerald-300';
     case 'ALERTA':
-      return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
+      return 'border-yellow-900/60 bg-yellow-950/40 text-yellow-300';
     case 'CADUCADO':
-      return 'border-orange-900/60 bg-orange-950/50 text-orange-400';
+      return 'border-orange-900/60 bg-orange-950/40 text-orange-300';
     case 'DAÑADO':
       return 'border-zinc-700 bg-zinc-900 text-zinc-300';
     case 'FALTANTE':
-      return 'border-red-900/60 bg-red-950/50 text-red-400';
+      return 'border-red-900/60 bg-red-950/40 text-red-300';
     default:
-      return 'border-zinc-800 bg-zinc-900 text-zinc-300';
+      return 'border-white/10 bg-white/[0.03] text-zinc-300';
   }
 }
 
@@ -306,7 +322,10 @@ function groupItemsByCategory(items = [], sortMode = 'counted-first') {
   const map = new Map();
 
   for (const item of Array.isArray(items) ? items : []) {
-    const categoryName = cleanText(item?.categoryName) || 'Sin categoría';
+    const categoryName =
+      cleanText(item?.categoryName) ||
+      cleanText(item?.categoryRaw) ||
+      'Sin categoría';
 
     if (!map.has(categoryName)) {
       map.set(categoryName, {
@@ -341,6 +360,32 @@ function groupItemsByCategory(items = [], sortMode = 'counted-first') {
 
   return groups.sort((a, b) =>
     a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
+  );
+}
+
+function StatCard({
+  icon: Icon,
+  title,
+  value,
+  iconClassName = 'text-zinc-300',
+}) {
+  return (
+    <div className="rounded-[24px] border border-white/10 bg-[#050505] p-4 sm:p-5">
+      <div className="flex items-start gap-3">
+        <div
+          className={`flex h-11 w-11 items-center justify-center rounded-2xl bg-white/[0.03] ${iconClassName}`}
+        >
+          <Icon size={20} />
+        </div>
+
+        <div className="min-w-0">
+          <p className="text-sm text-zinc-400">{title}</p>
+          <h2 className="mt-2 break-words text-lg font-semibold text-white sm:text-2xl">
+            {value}
+          </h2>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -457,6 +502,7 @@ export default function InventoryDayPage() {
       const searchable = [
         item?.productName || '',
         item?.categoryName || '',
+        item?.categoryRaw || '',
         item?.supplierName || '',
         item?.status || '',
         observationLabels,
@@ -510,7 +556,10 @@ export default function InventoryDayPage() {
 
     return {
       totalProducts: items.length,
-      totalCategories: todayInventory?.categories?.length || 0,
+      totalCategories:
+        todayInventory?.categories?.length ||
+        groupItemsByCategory(items).length ||
+        0,
       ok: items.filter((i) => i.status === 'OK').length,
       alerta: items.filter((i) => i.status === 'ALERTA').length,
       faltante: items.filter((i) => i.status === 'FALTANTE').length,
@@ -552,6 +601,7 @@ export default function InventoryDayPage() {
     if (!selectedFile) return;
 
     resetMessages();
+    setIosUploadHelp(false);
     setSelectedFileName(selectedFile.name || '');
     setUploading(true);
 
@@ -695,54 +745,52 @@ export default function InventoryDayPage() {
 
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      {/* Header */}
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
+      <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 sm:p-6">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-900/60 bg-blue-950/30 px-3 py-1 text-xs font-medium text-blue-300">
+            <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/25 bg-blue-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-blue-300">
               <FileText size={14} />
               Flujo diario
             </div>
 
-            <h1 className="mt-4 text-3xl font-bold text-white sm:text-4xl">
+            <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
               Inventario Diario
             </h1>
 
-            <p className="mt-2 text-sm leading-7 text-zinc-400 sm:text-base">
+            <p className="mt-2 text-sm leading-6 text-zinc-400 sm:text-base">
               Aquí subes el PDF oficial del día, se crea el inventario base y
               luego continúas con el conteo físico por producto.
             </p>
           </div>
 
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-sm text-zinc-300">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-zinc-300">
             <p className="text-zinc-500">Fecha activa</p>
             <p className="mt-1 font-semibold text-white">{todayLabel}</p>
           </div>
         </div>
       </section>
 
-      {/* Subida PDF SIEMPRE visible */}
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
+      <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 sm:p-6">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="max-w-3xl">
-            <h2 className="text-2xl font-bold text-white">
+            <h2 className="text-2xl font-semibold text-white">
               Importar PDF del día
             </h2>
-            <p className="mt-2 text-sm leading-7 text-zinc-400">
-              Este bloque siempre debe verse. Desde aquí cargas o reemplazas el
-              PDF oficial del inventario diario.
+            <p className="mt-2 text-sm leading-6 text-zinc-400">
+              Desde aquí cargas o reemplazas el PDF oficial del inventario
+              diario.
             </p>
           </div>
 
           {hasInventory && (
-            <div className="inline-flex items-center rounded-full border border-blue-900/60 bg-blue-950/40 px-4 py-2 text-sm font-medium text-blue-300">
+            <div className="inline-flex items-center rounded-full border border-blue-500/25 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-300">
               Inventario cargado para hoy
             </div>
           )}
         </div>
 
-        <div className="mt-5 grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
-          <div className="rounded-3xl border border-dashed border-zinc-700 bg-black p-5">
+        <div className="mt-5 grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
+          <div className="rounded-[26px] border border-dashed border-white/10 bg-black p-4 sm:p-5">
             <input
               ref={uploadInputRef}
               type="file"
@@ -756,15 +804,15 @@ export default function InventoryDayPage() {
 
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-4">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-600/15 text-blue-400">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600/15 text-blue-400">
                   {uploading ? (
-                    <Loader2 size={24} className="animate-spin" />
+                    <Loader2 size={22} className="animate-spin" />
                   ) : (
-                    <FileUp size={24} />
+                    <FileUp size={22} />
                   )}
                 </div>
 
-                <div>
+                <div className="min-w-0">
                   <p className="text-base font-semibold text-white">
                     {uploading
                       ? 'Procesando PDF...'
@@ -777,12 +825,12 @@ export default function InventoryDayPage() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 <button
                   type="button"
                   onClick={handleUploadButtonClick}
                   disabled={uploading}
-                  className={`inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 ${
+                  className={`inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 ${
                     uploading ? 'pointer-events-none opacity-60' : ''
                   }`}
                 >
@@ -794,7 +842,7 @@ export default function InventoryDayPage() {
                   type="button"
                   onClick={handleUploadButtonClick}
                   disabled={uploading}
-                  className={`inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-zinc-800 ${
+                  className={`inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/[0.06] ${
                     uploading ? 'pointer-events-none opacity-60' : ''
                   }`}
                 >
@@ -805,8 +853,8 @@ export default function InventoryDayPage() {
             </div>
 
             {selectedFileName && (
-              <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
                   Archivo seleccionado
                 </p>
                 <p className="mt-2 break-all text-sm font-medium text-white">
@@ -816,21 +864,21 @@ export default function InventoryDayPage() {
             )}
           </div>
 
-          <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-5">
+          <div className="rounded-[26px] border border-white/10 bg-white/[0.03] p-4 sm:p-5">
             <h3 className="text-base font-semibold text-white">
               Estado del PDF
             </h3>
 
             <div className="mt-4 space-y-3">
-              <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-3">
-                <p className="text-xs uppercase tracking-wide text-zinc-500">
+              <div className="rounded-2xl border border-white/10 bg-black px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
                   Fecha requerida
                 </p>
                 <p className="mt-1 font-semibold text-white">{todayLabel}</p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-3">
-                <p className="text-xs uppercase tracking-wide text-zinc-500">
+              <div className="rounded-2xl border border-white/10 bg-black px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
                   Inventario actual
                 </p>
                 <p className="mt-1 font-semibold text-white">
@@ -840,8 +888,8 @@ export default function InventoryDayPage() {
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-3">
-                <p className="text-xs uppercase tracking-wide text-zinc-500">
+              <div className="rounded-2xl border border-white/10 bg-black px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
                   Acción recomendada
                 </p>
                 <p className="mt-1 text-sm text-zinc-300">
@@ -856,7 +904,7 @@ export default function InventoryDayPage() {
       </section>
 
       {showIosStandaloneHelp && (
-        <section className="rounded-2xl border border-yellow-900/60 bg-yellow-950/30 px-4 py-4 text-sm text-yellow-100">
+        <section className="rounded-2xl border border-yellow-900/60 bg-yellow-950/20 px-4 py-4 text-sm text-yellow-100">
           <div className="flex items-start gap-3">
             <Smartphone className="mt-0.5 shrink-0 text-yellow-400" size={18} />
             <div className="space-y-3">
@@ -879,7 +927,7 @@ export default function InventoryDayPage() {
                 <button
                   type="button"
                   onClick={handleCopyLink}
-                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-2 font-medium text-white transition hover:bg-zinc-800"
+                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 font-medium text-white transition hover:bg-white/[0.06]"
                 >
                   <Copy size={16} />
                   Copiar enlace
@@ -902,13 +950,13 @@ export default function InventoryDayPage() {
       )}
 
       {error && (
-        <section className="rounded-2xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+        <section className="rounded-2xl border border-red-900/60 bg-red-950/30 px-4 py-3 text-sm text-red-200">
           {error}
         </section>
       )}
 
       {success && (
-        <section className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
+        <section className="rounded-2xl border border-emerald-900/60 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
           <div className="flex items-start gap-2">
             <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
             <span>{success}</span>
@@ -917,7 +965,7 @@ export default function InventoryDayPage() {
       )}
 
       {saveNotice && (
-        <section className="rounded-2xl border border-blue-900/60 bg-blue-950/40 px-4 py-3 text-sm text-blue-200">
+        <section className="rounded-2xl border border-blue-900/60 bg-blue-950/30 px-4 py-3 text-sm text-blue-200">
           <div className="flex items-start gap-2">
             <Bell size={18} className="mt-0.5 shrink-0" />
             <span>{saveNotice}</span>
@@ -925,76 +973,41 @@ export default function InventoryDayPage() {
         </section>
       )}
 
-      {/* Resumen rápido */}
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-blue-400">
-              <CalendarDays size={22} />
-            </div>
-
-            <div className="min-w-0">
-              <p className="text-sm text-zinc-400">Hoy</p>
-              <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
-                {todayLabel}
-              </h2>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-emerald-400">
-              <ClipboardList size={22} />
-            </div>
-
-            <div className="min-w-0">
-              <p className="text-sm text-zinc-400">Inventario de hoy</p>
-              <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
-                {loadingToday
-                  ? 'Cargando...'
-                  : getInventoryStatusLabel(todayInventory)}
-              </h2>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-yellow-400">
-              <Boxes size={22} />
-            </div>
-
-            <div className="min-w-0">
-              <p className="text-sm text-zinc-400">Categorías</p>
-              <h2 className="mt-2 text-xl font-bold text-white sm:text-2xl">
-                {stats.totalCategories}
-              </h2>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900 text-zinc-300">
-              <Package size={22} />
-            </div>
-
-            <div className="min-w-0">
-              <p className="text-sm text-zinc-400">Usuario actual</p>
-              <h2 className="mt-2 break-all text-base font-bold text-white sm:text-lg">
-                {user?.email || 'Sin usuario'}
-              </h2>
-            </div>
-          </div>
-        </div>
+        <StatCard
+          icon={CalendarDays}
+          title="Hoy"
+          value={todayLabel}
+          iconClassName="text-blue-400"
+        />
+        <StatCard
+          icon={ClipboardList}
+          title="Inventario de hoy"
+          value={
+            loadingToday
+              ? 'Cargando...'
+              : getInventoryStatusLabel(todayInventory)
+          }
+          iconClassName="text-emerald-400"
+        />
+        <StatCard
+          icon={Boxes}
+          title="Categorías"
+          value={stats.totalCategories}
+          iconClassName="text-yellow-400"
+        />
+        <StatCard
+          icon={Package}
+          title="Usuario actual"
+          value={user?.email || 'Sin usuario'}
+          iconClassName="text-zinc-300"
+        />
       </section>
 
-      {/* Inventario activo */}
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
+      <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 sm:p-6">
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-2xl font-bold text-white">
+            <h2 className="text-2xl font-semibold text-white">
               Inventario activo del día
             </h2>
             <p className="mt-1 text-sm text-zinc-400">
@@ -1004,12 +1017,12 @@ export default function InventoryDayPage() {
           </div>
 
           {hasInventory && (
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               {!isCountStarted && (
                 <button
                   onClick={handleStartCount}
                   disabled={startingCount}
-                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500 disabled:opacity-60"
+                  className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
                 >
                   {startingCount ? (
                     <Loader2 size={18} className="animate-spin" />
@@ -1023,7 +1036,7 @@ export default function InventoryDayPage() {
               {isCountStarted && isDraft && (
                 <Link
                   to={`/inventario/${todayInventory.id}/editar`}
-                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-3 font-medium text-white transition hover:bg-blue-500"
+                  className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
                 >
                   <Pencil size={18} />
                   Continuar conteo
@@ -1033,7 +1046,7 @@ export default function InventoryDayPage() {
               {todayInventory?.status === 'GUARDADO' && (
                 <Link
                   to={`/inventario/${todayInventory.id}`}
-                  className="inline-flex min-h-[46px] items-center justify-center rounded-2xl border border-zinc-700 bg-black px-4 py-3 font-medium text-white transition hover:border-zinc-500"
+                  className="inline-flex min-h-[48px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.06]"
                 >
                   Ver detalle
                 </Link>
@@ -1042,7 +1055,7 @@ export default function InventoryDayPage() {
               {canDownload && (
                 <button
                   onClick={() => exportInventoryToPDF(todayInventory)}
-                  className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 font-medium text-white transition hover:bg-emerald-500"
+                  className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500"
                 >
                   <Download size={18} />
                   Descargar
@@ -1053,7 +1066,7 @@ export default function InventoryDayPage() {
                 type="button"
                 onClick={handleUploadButtonClick}
                 disabled={uploading}
-                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-3 font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/[0.06] disabled:opacity-60"
               >
                 <RefreshCw size={18} />
                 Reemplazar PDF
@@ -1063,52 +1076,61 @@ export default function InventoryDayPage() {
         </div>
 
         {loadingToday ? (
-          <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
+          <div className="rounded-2xl border border-white/10 bg-black px-4 py-6 text-zinc-400">
             Cargando inventario...
           </div>
         ) : !todayInventory ? (
-          <div className="rounded-2xl border border-dashed border-zinc-800 bg-black px-4 py-6 text-zinc-400">
+          <div className="rounded-2xl border border-dashed border-white/10 bg-black px-4 py-6 text-zinc-400">
             Aún no has subido el PDF del inventario de hoy.
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
-                <p className="text-sm text-zinc-400">Fecha</p>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
+                <div className="flex items-center gap-2 text-zinc-400">
+                  <CalendarDays size={16} />
+                  <p className="text-sm">Fecha</p>
+                </div>
                 <p className="mt-2 font-semibold text-white">
-                  {todayInventory.date || 'Sin fecha'}
+                  {getInventoryDateLabel(todayInventory)}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
-                <p className="text-sm text-zinc-400">Semana</p>
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
+                <div className="flex items-center gap-2 text-zinc-400">
+                  <Hash size={16} />
+                  <p className="text-sm">Semana</p>
+                </div>
                 <p className="mt-2 font-semibold text-white">
                   {todayInventory.week || 'Sin semana'}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
-                <p className="text-sm text-zinc-400">Cedis</p>
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
+                <div className="flex items-center gap-2 text-zinc-400">
+                  <Building2 size={16} />
+                  <p className="text-sm">CEDIS</p>
+                </div>
                 <p className="mt-2 break-words font-semibold text-white">
                   {todayInventory.cedis || 'Sin cedis'}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
                 <p className="text-sm text-zinc-400">Productos</p>
                 <p className="mt-2 font-semibold text-white">
                   {stats.totalProducts}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
                 <p className="text-sm text-zinc-400">Stock esperado</p>
                 <p className="mt-2 font-semibold text-white">
                   {stats.totalStockEsperado.toLocaleString('es-MX')}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
                 <p className="text-sm text-zinc-400">No disponible</p>
                 <p className="mt-2 font-semibold text-white">
                   {stats.totalNoDisponible.toLocaleString('es-MX')}
@@ -1116,51 +1138,53 @@ export default function InventoryDayPage() {
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 p-4">
-                <p className="text-sm text-emerald-400">OK</p>
-                <p className="mt-2 text-2xl font-bold text-white">{stats.ok}</p>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/30 p-4">
+                <p className="text-sm text-emerald-300">OK</p>
+                <p className="mt-2 text-2xl font-semibold text-white">
+                  {stats.ok}
+                </p>
               </div>
 
-              <div className="rounded-2xl border border-yellow-900/60 bg-yellow-950/40 p-4">
-                <p className="text-sm text-yellow-400">Alerta</p>
-                <p className="mt-2 text-2xl font-bold text-white">
+              <div className="rounded-2xl border border-yellow-900/60 bg-yellow-950/30 p-4">
+                <p className="text-sm text-yellow-300">Alerta</p>
+                <p className="mt-2 text-2xl font-semibold text-white">
                   {stats.alerta}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-red-900/60 bg-red-950/40 p-4">
-                <p className="text-sm text-red-400">Faltantes</p>
-                <p className="mt-2 text-2xl font-bold text-white">
+              <div className="rounded-2xl border border-red-900/60 bg-red-950/30 p-4">
+                <p className="text-sm text-red-300">Faltantes</p>
+                <p className="mt-2 text-2xl font-semibold text-white">
                   {stats.faltante}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
                 <p className="text-sm text-zinc-400">Productos contados</p>
-                <p className="mt-2 text-2xl font-bold text-white">
+                <p className="mt-2 text-2xl font-semibold text-white">
                   {stats.totalCountedProducts}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <div className="rounded-2xl border border-white/10 bg-black p-4">
                 <p className="text-sm text-zinc-400">Conteo físico total</p>
-                <p className="mt-2 text-2xl font-bold text-white">
+                <p className="mt-2 text-2xl font-semibold text-white">
                   {stats.totalConteoFisico.toLocaleString('es-MX')}
                 </p>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-zinc-800 bg-black p-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 lg:flex-1">
+            <div className="rounded-[26px] border border-white/10 bg-black p-4">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 xl:flex-1">
                   <Search size={18} className="shrink-0 text-zinc-500" />
                   <input
                     type="text"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Buscar producto, categoría, proveedor, observación o cantidad..."
-                    className="w-full bg-transparent text-white outline-none placeholder:text-zinc-500"
+                    className="w-full bg-transparent text-sm text-white outline-none placeholder:text-zinc-500"
                   />
                   {search && (
                     <button
@@ -1173,8 +1197,8 @@ export default function InventoryDayPage() {
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-3">
-                  <label className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm text-zinc-200">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                  <label className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-zinc-200">
                     <Filter size={16} />
                     <span>Solo contados</span>
                     <input
@@ -1188,7 +1212,7 @@ export default function InventoryDayPage() {
                   <select
                     value={sortMode}
                     onChange={(e) => setSortMode(e.target.value)}
-                    className="min-h-[44px] rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm text-white outline-none"
+                    className="min-h-[44px] rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-white outline-none"
                   >
                     <option value="counted-first">
                       Ordenar: contados primero
@@ -1202,41 +1226,41 @@ export default function InventoryDayPage() {
                   <button
                     type="button"
                     onClick={expandAll}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-900"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.06]"
                   >
-                    <FolderOpen size={16} />
+                    <ChevronDown size={16} />
                     Expandir todo
                   </button>
 
                   <button
                     type="button"
                     onClick={collapseAll}
-                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-900"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.06]"
                   >
-                    <FolderOpen size={16} />
+                    <ChevronUp size={16} />
                     Contraer todo
                   </button>
                 </div>
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-sm text-zinc-400">Categorías visibles</p>
-                  <p className="mt-1 text-xl font-bold text-white">
+                  <p className="mt-1 text-xl font-semibold text-white">
                     {groupedFilteredItems.length}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-sm text-zinc-400">Productos visibles</p>
-                  <p className="mt-1 text-xl font-bold text-white">
+                  <p className="mt-1 text-xl font-semibold text-white">
                     {visibleProductsCount}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                   <p className="text-sm text-zinc-400">Búsqueda activa</p>
-                  <p className="mt-1 text-xl font-bold text-white">
+                  <p className="mt-1 text-xl font-semibold text-white">
                     {search ? 'Sí' : 'No'}
                   </p>
                 </div>
@@ -1245,7 +1269,7 @@ export default function InventoryDayPage() {
 
             <div className="space-y-4">
               {groupedFilteredItems.length === 0 ? (
-                <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
+                <div className="rounded-2xl border border-white/10 bg-black px-4 py-6 text-zinc-400">
                   No hay productos que coincidan con la búsqueda.
                 </div>
               ) : (
@@ -1255,15 +1279,15 @@ export default function InventoryDayPage() {
                   return (
                     <article
                       key={group.id}
-                      className="overflow-hidden rounded-3xl border border-zinc-800 bg-black"
+                      className="overflow-hidden rounded-[28px] border border-white/10 bg-black"
                     >
                       <button
                         type="button"
                         onClick={() => toggleCategory(group.id)}
-                        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-zinc-950 sm:px-5"
+                        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-white/[0.03] sm:px-5"
                       >
                         <div className="min-w-0">
-                          <h3 className="break-words text-base font-bold text-blue-400 sm:text-lg">
+                          <h3 className="break-words text-base font-semibold text-blue-400 sm:text-lg">
                             {group.name}
                           </h3>
                           <p className="mt-1 text-sm text-zinc-400">
@@ -1274,7 +1298,7 @@ export default function InventoryDayPage() {
                           </p>
                         </div>
 
-                        <div className="shrink-0 rounded-2xl border border-zinc-800 bg-zinc-950 p-2 text-zinc-300">
+                        <div className="shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-2 text-zinc-300">
                           {isExpanded ? (
                             <ChevronUp size={18} />
                           ) : (
@@ -1284,7 +1308,7 @@ export default function InventoryDayPage() {
                       </button>
 
                       {isExpanded && (
-                        <div className="border-t border-zinc-800 px-4 py-4 sm:px-5">
+                        <div className="border-t border-white/10 px-4 py-4 sm:px-5">
                           <div className="space-y-3">
                             {group.items.map((item, index) => {
                               const counted = getCountedQuantity(item);
@@ -1298,7 +1322,7 @@ export default function InventoryDayPage() {
                               return (
                                 <div
                                   key={`${group.id}-${item.productName || 'producto'}-${index}`}
-                                  className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4"
+                                  className="rounded-[24px] border border-white/10 bg-[#050505] p-4"
                                 >
                                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                                     <div className="min-w-0">
@@ -1340,7 +1364,7 @@ export default function InventoryDayPage() {
                                   </div>
 
                                   <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                    <div className="rounded-xl border border-white/10 bg-black px-3 py-2">
                                       <span className="block text-xs text-zinc-500">
                                         Stock esperado
                                       </span>
@@ -1349,7 +1373,7 @@ export default function InventoryDayPage() {
                                       </span>
                                     </div>
 
-                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                    <div className="rounded-xl border border-white/10 bg-black px-3 py-2">
                                       <span className="block text-xs text-zinc-500">
                                         No disponible
                                       </span>
@@ -1360,7 +1384,7 @@ export default function InventoryDayPage() {
                                       </span>
                                     </div>
 
-                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                    <div className="rounded-xl border border-white/10 bg-black px-3 py-2">
                                       <span className="block text-xs text-zinc-500">
                                         Conteo físico
                                       </span>
@@ -1375,7 +1399,7 @@ export default function InventoryDayPage() {
                                       </span>
                                     </div>
 
-                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                    <div className="rounded-xl border border-white/10 bg-black px-3 py-2">
                                       <span className="block text-xs text-zinc-500">
                                         Sobra
                                       </span>
@@ -1386,7 +1410,7 @@ export default function InventoryDayPage() {
                                       </span>
                                     </div>
 
-                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                    <div className="rounded-xl border border-white/10 bg-black px-3 py-2">
                                       <span className="block text-xs text-zinc-500">
                                         Falta
                                       </span>
@@ -1401,8 +1425,8 @@ export default function InventoryDayPage() {
                                   </div>
 
                                   {countEntries.length > 0 && (
-                                    <div className="mt-4 rounded-2xl border border-zinc-800 bg-black p-3">
-                                      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                    <div className="mt-4 rounded-2xl border border-white/10 bg-black p-3">
+                                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
                                         Historial de conteos
                                       </p>
 
@@ -1411,7 +1435,7 @@ export default function InventoryDayPage() {
                                           (entry, entryIndex) => (
                                             <div
                                               key={`${item.productName}-entry-${entryIndex}`}
-                                              className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2"
+                                              className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
                                             >
                                               <div className="flex flex-wrap items-center gap-2">
                                                 <span
@@ -1459,7 +1483,10 @@ export default function InventoryDayPage() {
                                                     entry?.createdAtLabel ||
                                                       entry?.createdAt
                                                   )
-                                                    ? ` · ${cleanText(entry?.createdAtLabel || entry?.createdAt)}`
+                                                    ? ` · ${cleanText(
+                                                        entry?.createdAtLabel ||
+                                                          entry?.createdAt
+                                                      )}`
                                                     : ''}
                                                 </p>
                                               )}
@@ -1484,10 +1511,9 @@ export default function InventoryDayPage() {
         )}
       </section>
 
-      {/* Historial */}
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
+      <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 sm:p-6">
         <div className="mb-4">
-          <h2 className="text-2xl font-bold text-white">
+          <h2 className="text-2xl font-semibold text-white">
             Historial de inventarios
           </h2>
           <p className="mt-1 text-sm text-zinc-400">
@@ -1497,23 +1523,23 @@ export default function InventoryDayPage() {
 
         <div className="space-y-3">
           {loadingHistory ? (
-            <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
+            <div className="rounded-2xl border border-white/10 bg-black px-4 py-6 text-zinc-400">
               Cargando historial...
             </div>
           ) : allInventories.length === 0 ? (
-            <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
+            <div className="rounded-2xl border border-white/10 bg-black px-4 py-6 text-zinc-400">
               No hay inventarios guardados todavía.
             </div>
           ) : (
             allInventories.slice(0, 20).map((inv) => (
               <div
                 key={inv.id}
-                className="rounded-2xl border border-zinc-800 bg-black p-4"
+                className="rounded-2xl border border-white/10 bg-black p-4"
               >
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="min-w-0">
                     <p className="font-semibold text-white">
-                      {inv.date || 'Sin fecha'}
+                      {getInventoryDateLabel(inv)}
                     </p>
 
                     <p className="mt-1 text-sm text-zinc-400">
@@ -1528,14 +1554,14 @@ export default function InventoryDayPage() {
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <Link
                       to={`/inventario/${inv.id}`}
-                      className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-2 font-medium text-white transition hover:border-zinc-500"
+                      className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/[0.06]"
                     >
                       Ver detalle
                     </Link>
 
                     <button
                       onClick={() => exportInventoryToPDF(inv)}
-                      className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-2 font-medium text-white transition hover:bg-emerald-500"
+                      className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-emerald-700 bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
                     >
                       <Download size={16} />
                       Descargar
@@ -1548,13 +1574,13 @@ export default function InventoryDayPage() {
         </div>
       </section>
 
-      <section className="rounded-3xl border border-yellow-900/60 bg-yellow-950/20 p-5">
+      <section className="rounded-[28px] border border-yellow-900/60 bg-yellow-950/20 p-4 sm:p-5">
         <div className="flex gap-3">
           <AlertTriangle
             className="mt-0.5 shrink-0 text-yellow-400"
             size={20}
           />
-          <div className="text-sm leading-7 text-yellow-100">
+          <div className="text-sm leading-6 text-yellow-100">
             Mientras el inventario esté en borrador, los usuarios pueden seguir
             contando y ver cambios en tiempo real. Solo al guardar final pasará
             al historial y quedará listo para descargar.

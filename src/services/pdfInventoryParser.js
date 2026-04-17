@@ -23,6 +23,14 @@ function safeString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function safeNumber(value) {
+  if (value === undefined || value === null || value === '') return 0;
+  const parsed = Number(
+    String(value).replace(/\s/g, '').replace(/,/g, '').trim()
+  );
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function normalizeSpaces(value) {
   return String(value || '')
     .replace(/\s+/g, ' ')
@@ -54,14 +62,7 @@ function normalizeForCompare(value) {
 }
 
 function parseNumber(value) {
-  if (value === undefined || value === null) return 0;
-
-  const normalized = String(value).replace(/\s/g, '').replace(/,/g, '').trim();
-
-  if (!normalized) return 0;
-
-  const parsed = Number(normalized);
-  return Number.isNaN(parsed) ? 0 : parsed;
+  return safeNumber(value);
 }
 
 function flattenPages(pages) {
@@ -105,10 +106,11 @@ function isDecorativeLine(line) {
     normalized === 'producto' ||
     normalized === 'cantidad' ||
     normalized === 'no disponible' ||
+    normalized === 'no disponib le' ||
     normalized === 'conteo fisico' ||
     normalized === 'total diferencia' ||
     normalized === 'observacion' ||
-    normalized === 'observación' ||
+    normalized === 'observacion diferencia' ||
     normalized.indexOf('producto cantidad') === 0 ||
     normalized.indexOf('cantidad no disponible') === 0 ||
     normalized.indexOf('distribuciones a detalle') === 0 ||
@@ -116,15 +118,14 @@ function isDecorativeLine(line) {
     normalized.indexOf('fecha:') === 0 ||
     normalized.indexOf('semana:') === 0 ||
     normalized.indexOf('cedis:') === 0 ||
-    /^hoja \d+ de \d+$/i.test(normalized) ||
-    /^pagina \d+ de \d+$/i.test(normalized) ||
+    /^hoja\s+\d+\s+de\s+\d+/i.test(normalized) ||
+    /^pagina\s+\d+\s+de\s+\d+/i.test(normalized) ||
     /^-+$/.test(normalized)
   );
 }
 
 function isCategoryHeader(line) {
   const cleaned = cleanLine(line);
-
   return /^\d{2}\s*-\s*.+?\s*-\s*\d+\s*-\s*.+$/i.test(cleaned);
 }
 
@@ -179,10 +180,9 @@ function parseProductLine(line) {
   if (isCategoryHeader(cleaned)) return null;
   if (isTotalLine(cleaned)) return null;
 
-  // Caso normal: PRODUCTO 123 4
   let match = cleaned.match(/^(.*?)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)$/);
+
   if (!match) {
-    // fallback más tolerante
     match = cleaned.match(/^(.+?)\s+(\d[\d,]*)\s+(\d[\d,]*)$/);
   }
 
@@ -199,6 +199,18 @@ function parseProductLine(line) {
     quantity,
     noDisponible,
   };
+}
+
+function extractValueFromFullText(fullText, label) {
+  const normalizedText = normalizeSpaces(fullText);
+  const regex = new RegExp(
+    `${label}\\s*:\\s*([^\\n]+?)($|\\s{2,}|PRODUCTO|CANTIDAD|NO\\s+DISPONIB|CONTEO\\s+FISICO|TOTAL|DIFERENCIA|OBSERVACI[ÓO]N)`,
+    'i'
+  );
+  const match = normalizedText.match(regex);
+
+  if (!match) return '';
+  return normalizeSpaces(match[1]);
 }
 
 function extractSingleLineValue(allLines, label) {
@@ -255,35 +267,97 @@ function cleanCedisValue(value) {
   return normalizeSpaces(text);
 }
 
-function extractMetaFromLines(allLines, fullText) {
-  const normalized = normalizeSpaces(fullText);
+function extractWeek(fullText, allLines) {
+  const normalizedText = normalizeSpaces(fullText);
+  const fromFullText = normalizedText.match(/Semana:\s*(\d{1,2})/i);
+  if (fromFullText) return normalizeSpaces(fromFullText[1]);
 
-  const weekMatch = normalized.match(/Semana:\s*(\d+)/i);
+  for (const line of allLines) {
+    const cleaned = cleanLine(line);
+    const match = cleaned.match(/Semana:\s*(\d{1,2})/i);
+    if (match) return normalizeSpaces(match[1]);
+  }
 
-  const dateMatch = normalized.match(
+  return '';
+}
+
+function extractDateLabel(fullText, allLines) {
+  const normalizedText = normalizeSpaces(fullText);
+  const fromFullText = normalizedText.match(
     /Fecha:\s*([0-9]{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4})/i
   );
+  if (fromFullText) return normalizeSpaces(fromFullText[1]);
 
-  const totalGeneralMatch = normalized.match(
-    /TOTAL GENERAL\.-\s*([-\d,]+)\s+([-\d,]+)/i
+  for (const line of allLines) {
+    const cleaned = cleanLine(line);
+    const match = cleaned.match(
+      /Fecha:\s*([0-9]{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4})/i
+    );
+    if (match) return normalizeSpaces(match[1]);
+  }
+
+  const mergedHeader = allLines.slice(0, 12).map(cleanLine).join(' ');
+  const fallback = mergedHeader.match(
+    /([0-9]{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4})/i
   );
+  return fallback ? normalizeSpaces(fallback[1]) : '';
+}
 
-  const cedisLineValue =
+function extractCedis(fullText, allLines) {
+  const fromLine =
     extractSingleLineValue(allLines, 'Cedis') ||
     extractSingleLineValue(allLines, 'CEDIS');
 
-  const dateLabel = dateMatch ? normalizeSpaces(dateMatch[1]) : '';
-  const dateKey = parseSpanishDateToKey(dateLabel);
+  if (fromLine) return cleanCedisValue(fromLine);
+
+  const fromFullText = extractValueFromFullText(fullText, 'Cedis');
+  if (fromFullText) return cleanCedisValue(fromFullText);
+
+  const normalizedText = normalizeSpaces(fullText);
+  const direct = normalizedText.match(/Cedis:\s*([A-ZÁÉÍÓÚÑ0-9 ._-]+)/i);
+  if (direct) return cleanCedisValue(direct[1]);
+
+  const mergedHeader = allLines.slice(0, 12).map(cleanLine).join(' ');
+  const headerMatch = mergedHeader.match(/Cedis:\s*([A-ZÁÉÍÓÚÑ0-9 ._-]+)/i);
+  if (headerMatch) return cleanCedisValue(headerMatch[1]);
+
+  return '';
+}
+
+function extractTotalGeneral(fullText) {
+  const normalizedText = normalizeSpaces(fullText);
+
+  const match = normalizedText.match(
+    /TOTAL GENERAL\.-\s*([-\d,]+)\s+([-\d,]+)/i
+  );
+
+  if (!match) {
+    return {
+      totalGeneral: 0,
+      totalGeneralNoDisponible: 0,
+    };
+  }
 
   return {
-    week: weekMatch ? normalizeSpaces(weekMatch[1]) : '',
+    totalGeneral: parseNumber(match[1]),
+    totalGeneralNoDisponible: parseNumber(match[2]),
+  };
+}
+
+function extractMetaFromLines(allLines, fullText) {
+  const week = extractWeek(fullText, allLines);
+  const dateLabel = extractDateLabel(fullText, allLines);
+  const dateKey = parseSpanishDateToKey(dateLabel);
+  const cedis = extractCedis(fullText, allLines);
+  const totals = extractTotalGeneral(fullText);
+
+  return {
+    week,
     dateLabel,
     dateKey,
-    cedis: cleanCedisValue(cedisLineValue),
-    totalGeneral: totalGeneralMatch ? parseNumber(totalGeneralMatch[1]) : 0,
-    totalGeneralNoDisponible: totalGeneralMatch
-      ? parseNumber(totalGeneralMatch[2])
-      : 0,
+    cedis,
+    totalGeneral: totals.totalGeneral,
+    totalGeneralNoDisponible: totals.totalGeneralNoDisponible,
   };
 }
 

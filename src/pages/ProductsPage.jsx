@@ -15,7 +15,11 @@ import {
   X,
   Filter,
 } from 'lucide-react';
-import { getInventoryByDate, updateInventory } from '../services/inventory';
+import {
+  getInventoryByDate,
+  subscribeInventoryByDate,
+  updateInventory,
+} from '../services/inventory';
 
 function getTodayKey() {
   const now = new Date();
@@ -23,6 +27,23 @@ function getTodayKey() {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function formatDateLabelFromKey(dateKey) {
+  if (!dateKey) return 'Sin fecha';
+
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const date = new Date(
+    year || new Date().getFullYear(),
+    (month || 1) - 1,
+    day || 1
+  );
+
+  return new Intl.DateTimeFormat('es-MX', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
 }
 
 function normalizeText(value) {
@@ -48,6 +69,17 @@ function makeLocalId(prefix = 'row') {
   }
 
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildItemKey(item, idx = 0) {
+  const supplierCode = normalizeText(item?.supplierCode || '').toLowerCase();
+  const categoryCode = normalizeText(item?.categoryCode || '').toLowerCase();
+  const productName = normalizeText(item?.productName || '').toLowerCase();
+
+  return (
+    normalizeText(item?.itemKey) ||
+    `${supplierCode}::${categoryCode}::${productName || `item-${idx}`}`
+  );
 }
 
 function getItemStatus(expectedQuantity, unavailableQuantity) {
@@ -92,18 +124,122 @@ function sortProducts(list = [], sortMode = 'name') {
   });
 }
 
+function rebuildCategoriesFromItems(items = []) {
+  const map = new Map();
+
+  for (const item of Array.isArray(items) ? items : []) {
+    const supplierCode = normalizeText(item?.supplierCode);
+    const supplierName = normalizeText(item?.supplierName);
+    const categoryCode = normalizeText(item?.categoryCode);
+    const categoryName = normalizeText(item?.categoryName) || 'Sin categoría';
+    const categoryRaw =
+      normalizeText(item?.categoryRaw) || normalizeText(item?.categoryName);
+    const fullName =
+      normalizeText(item?.fullName) ||
+      normalizeText(item?.categoryRaw) ||
+      normalizeText(item?.categoryName) ||
+      'Sin categoría';
+
+    const key = [supplierCode, categoryCode, categoryName].join('::');
+
+    if (!map.has(key)) {
+      map.set(key, {
+        supplierCode,
+        supplierName,
+        categoryCode,
+        categoryName,
+        categoryRaw,
+        fullName,
+        itemCount: 0,
+        quantityTotal: 0,
+        noDisponibleTotal: 0,
+      });
+    }
+
+    const ref = map.get(key);
+    ref.itemCount += 1;
+    ref.quantityTotal += normalizeStock(item?.expectedQuantity);
+    ref.noDisponibleTotal += normalizeStock(item?.unavailableQuantity);
+  }
+
+  return Array.from(map.values()).sort((a, b) =>
+    normalizeText(a.fullName).localeCompare(normalizeText(b.fullName), 'es', {
+      sensitivity: 'base',
+    })
+  );
+}
+
+function mapInventoryItemsToEditorProducts(inv) {
+  return Array.isArray(inv?.items)
+    ? inv.items.map((item, idx) => ({
+        id: makeLocalId('product'),
+        sourceKey: buildItemKey(item, idx),
+        name: item.productName || '',
+        category: item.categoryName || item.categoryRaw || '',
+        stock: item.expectedQuantity ?? 0,
+        unavailableQuantity: item.unavailableQuantity ?? 0,
+        status:
+          item.status ||
+          getItemStatus(item.expectedQuantity, item.unavailableQuantity),
+        supplierCode: item.supplierCode || '',
+        supplierName: item.supplierName || '',
+        categoryCode: item.categoryCode || '',
+        categoryRaw: item.categoryRaw || '',
+        countEntries: Array.isArray(item.countEntries) ? item.countEntries : [],
+        observation: item.observation || '',
+        isDirty: false,
+        isNew: false,
+      }))
+    : [];
+}
+
+function buildInventoryItemsFromEditorProducts(products = [], previousItems = []) {
+  const previousMap = new Map(
+    (Array.isArray(previousItems) ? previousItems : []).map((item, idx) => [
+      buildItemKey(item, idx),
+      item,
+    ])
+  );
+
+  return products.map((product, idx) => {
+    const previous = previousMap.get(product.sourceKey) || {};
+
+    const expectedQuantity = normalizeStock(product.stock);
+    const unavailableQuantity = normalizeStock(product.unavailableQuantity);
+
+    return {
+      itemKey: previous.itemKey || product.sourceKey || buildItemKey(product, idx),
+      productName: normalizeText(product.name),
+      categoryName: normalizeText(product.category),
+      categoryCode: normalizeText(product.categoryCode),
+      categoryRaw:
+        normalizeText(product.categoryRaw) || normalizeText(product.category),
+      supplierName: normalizeText(product.supplierName),
+      supplierCode: normalizeText(product.supplierCode),
+      expectedQuantity,
+      unavailableQuantity,
+      countedQuantity: previous.countedQuantity ?? '',
+      total: previous.total ?? '',
+      difference: previous.difference ?? '',
+      observation: previous.observation || product.observation || '',
+      countEntries: Array.isArray(previous.countEntries) ? previous.countEntries : [],
+      status: getItemStatus(expectedQuantity, unavailableQuantity),
+    };
+  });
+}
+
 function InfoCard({ icon, title, value, helper }) {
   return (
-    <article className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 sm:p-5">
+    <article className="rounded-[24px] border border-white/10 bg-[#050505] p-4 sm:p-5">
       <div className="flex items-center justify-between">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-3 text-blue-400">
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-blue-400">
           {icon}
         </div>
       </div>
 
       <div className="mt-4">
         <p className="text-sm text-zinc-400">{title}</p>
-        <h3 className="mt-1 text-2xl font-bold text-white">{value}</h3>
+        <h3 className="mt-1 text-2xl font-semibold text-white">{value}</h3>
         <p className="mt-1 text-xs text-zinc-500">{helper}</p>
       </div>
     </article>
@@ -112,6 +248,7 @@ function InfoCard({ icon, title, value, helper }) {
 
 export default function ProductsPage() {
   const todayKey = useMemo(() => getTodayKey(), []);
+  const todayLabel = useMemo(() => formatDateLabelFromKey(todayKey), [todayKey]);
 
   const [inventoryId, setInventoryId] = useState(null);
   const [inventoryData, setInventoryData] = useState(null);
@@ -138,10 +275,41 @@ export default function ProductsPage() {
   });
 
   useEffect(() => {
-    loadTodayInventory();
-  }, []);
+    setLoading(true);
+    setPageError('');
+    setPageSuccess('');
 
-  async function loadTodayInventory() {
+    const unsubscribe = subscribeInventoryByDate(todayKey, (inv) => {
+      if (!inv) {
+        setInventoryId(null);
+        setInventoryData(null);
+        setProducts([]);
+        setLoading(false);
+        return;
+      }
+
+      setInventoryId(inv.id);
+      setInventoryData(inv);
+      setProducts((prev) => {
+        const dirtyMap = new Map(
+          prev.filter((item) => item.isDirty).map((item) => [item.sourceKey, item])
+        );
+
+        const incoming = mapInventoryItemsToEditorProducts(inv);
+
+        return incoming.map((item) => {
+          const dirtyVersion = dirtyMap.get(item.sourceKey);
+          return dirtyVersion ? { ...dirtyVersion } : item;
+        });
+      });
+
+      setLoading(false);
+    });
+
+    return () => unsubscribe?.();
+  }, [todayKey]);
+
+  async function loadTodayInventoryFallback() {
     setLoading(true);
     setPageError('');
     setPageSuccess('');
@@ -158,23 +326,7 @@ export default function ProductsPage() {
 
       setInventoryId(inv.id);
       setInventoryData(inv);
-
-      const mapped = Array.isArray(inv.items)
-        ? inv.items.map((item, idx) => ({
-            id: makeLocalId('product'),
-            itemIndex: idx,
-            name: item.productName || '',
-            category: item.categoryName || '',
-            stock: item.expectedQuantity ?? 0,
-            unavailableQuantity: item.unavailableQuantity ?? 0,
-            status:
-              item.status ||
-              getItemStatus(item.expectedQuantity, item.unavailableQuantity),
-            isDirty: false,
-          }))
-        : [];
-
-      setProducts(mapped);
+      setProducts(mapInventoryItemsToEditorProducts(inv));
     } catch (error) {
       console.error(error);
       setPageError('No se pudo cargar el inventario del día.');
@@ -205,52 +357,46 @@ export default function ProductsPage() {
           updated.status = getItemStatus(value, item.unavailableQuantity);
         }
 
+        if (field === 'category') {
+          updated.categoryRaw = value;
+        }
+
         return updated;
       })
     );
   }
 
-  function buildUpdatedInventoryItems(baseItems, product) {
-    const cleanName = normalizeText(product.name);
-    const cleanCategory = normalizeText(product.category);
-    const cleanStock = normalizeStock(product.stock);
-
-    const updatedItems = Array.isArray(baseItems) ? [...baseItems] : [];
-
-    if (
-      product.itemIndex !== undefined &&
-      product.itemIndex !== null &&
-      product.itemIndex >= 0 &&
-      product.itemIndex < updatedItems.length
-    ) {
-      const original = updatedItems[product.itemIndex] || {};
-
-      updatedItems[product.itemIndex] = {
-        ...original,
-        productName: cleanName,
-        categoryName: cleanCategory,
-        expectedQuantity: cleanStock,
-        status: getItemStatus(cleanStock, original.unavailableQuantity),
-      };
-    } else {
-      updatedItems.push({
-        productName: cleanName,
-        categoryName: cleanCategory,
-        categoryCode: '',
-        categoryRaw: '',
-        supplierName: '',
-        supplierCode: '',
-        expectedQuantity: cleanStock,
-        unavailableQuantity: 0,
-        countedQuantity: '',
-        total: '',
-        difference: '',
-        observation: '',
-        status: getItemStatus(cleanStock, 0),
-      });
+  async function saveAllProducts(nextProducts, successMessage) {
+    if (!inventoryId || !inventoryData) {
+      setPageError('No se ha cargado un inventario válido del día.');
+      return false;
     }
 
-    return updatedItems;
+    const invalid = nextProducts.find(
+      (product) =>
+        !normalizeText(product.name) || !normalizeText(product.category)
+    );
+
+    if (invalid) {
+      setPageError('Todos los productos deben tener nombre y categoría.');
+      return false;
+    }
+
+    const updatedItems = buildInventoryItemsFromEditorProducts(
+      nextProducts,
+      inventoryData.items || []
+    );
+
+    const updatedInv = {
+      ...inventoryData,
+      items: updatedItems,
+      categories: rebuildCategoriesFromItems(updatedItems),
+    };
+
+    await updateInventory(inventoryId, updatedInv);
+    setInventoryData(updatedInv);
+    setPageSuccess(successMessage);
+    return true;
   }
 
   async function saveRow(product) {
@@ -278,40 +424,28 @@ export default function ProductsPage() {
     try {
       setSavingRowId(product.id);
 
-      const updatedItems = buildUpdatedInventoryItems(
-        inventoryData.items || [],
-        product
+      const nextProducts = products.map((item) =>
+        item.id === product.id
+          ? {
+              ...item,
+              name: cleanName,
+              category: cleanCategory,
+              categoryRaw: cleanCategory,
+              stock: cleanStock,
+              status: getItemStatus(cleanStock, item.unavailableQuantity),
+              isDirty: false,
+            }
+          : item
       );
 
-      const updatedInv = {
-        ...inventoryData,
-        items: updatedItems,
-      };
-
-      await updateInventory(inventoryId, updatedInv);
-
-      setInventoryData(updatedInv);
-
-      setProducts((prev) =>
-        prev.map((item) =>
-          item.id === product.id
-            ? {
-                ...item,
-                name: cleanName,
-                category: cleanCategory,
-                stock: cleanStock,
-                status: getItemStatus(cleanStock, item.unavailableQuantity),
-                isDirty: false,
-                itemIndex:
-                  product.itemIndex !== undefined && product.itemIndex !== null
-                    ? product.itemIndex
-                    : updatedItems.length - 1,
-              }
-            : item
-        )
+      const saved = await saveAllProducts(
+        nextProducts,
+        'Producto actualizado correctamente.'
       );
 
-      setPageSuccess('Producto actualizado correctamente.');
+      if (saved) {
+        setProducts(nextProducts);
+      }
     } catch (error) {
       console.error(error);
       setPageError('No se pudo guardar el producto.');
@@ -347,52 +481,38 @@ export default function ProductsPage() {
     try {
       setAddingProduct(true);
 
-      const newItem = {
-        productName: cleanName,
-        categoryName: cleanCategory,
-        categoryCode: '',
-        categoryRaw: '',
-        supplierName: '',
-        supplierCode: '',
-        expectedQuantity: cleanStock,
-        unavailableQuantity: 0,
-        countedQuantity: '',
-        total: '',
-        difference: '',
-        observation: '',
-        status: getItemStatus(cleanStock, 0),
-      };
-
-      const updatedItems = [...(inventoryData.items || []), newItem];
-      const updatedInv = {
-        ...inventoryData,
-        items: updatedItems,
-      };
-
-      await updateInventory(inventoryId, updatedInv);
-
-      setInventoryData(updatedInv);
-
       const addedLocalProduct = {
         id: makeLocalId('product'),
-        itemIndex: updatedItems.length - 1,
+        sourceKey: makeLocalId('new-item'),
         name: cleanName,
         category: cleanCategory,
         stock: cleanStock,
         unavailableQuantity: 0,
         status: getItemStatus(cleanStock, 0),
+        supplierCode: '',
+        supplierName: '',
+        categoryCode: '',
+        categoryRaw: cleanCategory,
+        countEntries: [],
+        observation: '',
         isDirty: false,
+        isNew: true,
       };
 
-      setProducts((prev) => [addedLocalProduct, ...prev]);
+      const nextProducts = [addedLocalProduct, ...products];
+      const saved = await saveAllProducts(
+        nextProducts,
+        'Producto agregado correctamente.'
+      );
 
-      setNewProduct({
-        name: '',
-        category: '',
-        stock: '',
-      });
-
-      setPageSuccess('Producto agregado correctamente.');
+      if (saved) {
+        setProducts(nextProducts);
+        setNewProduct({
+          name: '',
+          category: '',
+          stock: '',
+        });
+      }
     } catch (error) {
       console.error(error);
       setPageError('No se pudo agregar el producto.');
@@ -424,29 +544,15 @@ export default function ProductsPage() {
         return;
       }
 
-      const idx = item.itemIndex;
-      const updatedItems = (inventoryData.items || []).filter(
-        (_, index) => index !== idx
+      const nextProducts = products.filter((p) => p.id !== productId);
+      const saved = await saveAllProducts(
+        nextProducts,
+        'Producto eliminado correctamente.'
       );
 
-      const updatedInv = {
-        ...inventoryData,
-        items: updatedItems,
-      };
-
-      await updateInventory(inventoryId, updatedInv);
-
-      setInventoryData(updatedInv);
-      setProducts((prev) =>
-        prev
-          .filter((p) => p.id !== productId)
-          .map((p) => ({
-            ...p,
-            itemIndex: p.itemIndex > idx ? p.itemIndex - 1 : p.itemIndex,
-          }))
-      );
-
-      setPageSuccess('Producto eliminado correctamente.');
+      if (saved) {
+        setProducts(nextProducts);
+      }
     } catch (error) {
       console.error(error);
       setPageError('No se pudo eliminar el producto.');
@@ -566,12 +672,14 @@ export default function ProductsPage() {
 
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 sm:p-6">
-        <p className="text-sm font-medium text-blue-400">Editor del día</p>
+      <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 sm:p-6">
+        <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-blue-300">
+          Editor del día
+        </p>
 
         <div className="mt-2 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-3xl">
-            <h1 className="text-3xl font-bold text-white sm:text-4xl">
+            <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
               Productos del inventario base
             </h1>
 
@@ -582,9 +690,9 @@ export default function ProductsPage() {
             </p>
           </div>
 
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-sm text-zinc-300">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-zinc-300">
             <span className="block text-zinc-500">Fecha activa</span>
-            <span className="font-semibold text-white">{todayKey}</span>
+            <span className="font-semibold text-white">{todayLabel}</span>
           </div>
         </div>
       </section>
@@ -607,7 +715,7 @@ export default function ProductsPage() {
         <InfoCard
           icon={<Boxes className="h-5 w-5" />}
           title="Stock total"
-          value={String(totalStock)}
+          value={String(totalStock.toLocaleString('es-MX'))}
           helper="Suma de existencias"
         />
 
@@ -620,10 +728,10 @@ export default function ProductsPage() {
       </section>
 
       {!loading && !hasTodayInventory && (
-        <section className="rounded-3xl border border-yellow-900/60 bg-yellow-950/20 p-5">
+        <section className="rounded-[28px] border border-yellow-900/60 bg-yellow-950/20 p-5">
           <div className="flex gap-3">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-yellow-400" />
-            <div className="text-sm leading-7 text-yellow-100">
+            <div className="text-sm leading-6 text-yellow-100">
               No hay inventario cargado para hoy. Primero debes subir el PDF del
               inventario diario para poder editar productos.
             </div>
@@ -631,7 +739,7 @@ export default function ProductsPage() {
         </section>
       )}
 
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 sm:p-6">
+      <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 sm:p-6">
         <div className="flex items-center gap-2">
           <Plus className="h-5 w-5 text-blue-400" />
           <h2 className="text-xl font-semibold text-white">
@@ -647,7 +755,7 @@ export default function ProductsPage() {
             onChange={(e) =>
               setNewProduct((prev) => ({ ...prev, name: e.target.value }))
             }
-            className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+            className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-blue-500"
           />
 
           <input
@@ -657,7 +765,7 @@ export default function ProductsPage() {
             onChange={(e) =>
               setNewProduct((prev) => ({ ...prev, category: e.target.value }))
             }
-            className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+            className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-blue-500"
           />
 
           <input
@@ -668,13 +776,13 @@ export default function ProductsPage() {
             onChange={(e) =>
               setNewProduct((prev) => ({ ...prev, stock: e.target.value }))
             }
-            className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+            className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-blue-500"
           />
 
           <button
             onClick={addProduct}
             disabled={addingProduct || !hasTodayInventory}
-            className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {addingProduct ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -686,7 +794,7 @@ export default function ProductsPage() {
         </div>
       </section>
 
-      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 sm:p-6">
+      <section className="rounded-[28px] border border-white/10 bg-[#050505] p-4 sm:p-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-xl font-semibold text-white">
@@ -701,7 +809,7 @@ export default function ProductsPage() {
             <button
               type="button"
               onClick={expandAll}
-              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.06]"
             >
               <ChevronDown className="h-4 w-4" />
               Expandir todo
@@ -710,7 +818,7 @@ export default function ProductsPage() {
             <button
               type="button"
               onClick={collapseAll}
-              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.06]"
             >
               <ChevronUp className="h-4 w-4" />
               Contraer todo
@@ -726,7 +834,7 @@ export default function ProductsPage() {
               placeholder="Buscar producto o categoría"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 py-3 pl-10 pr-10 text-white outline-none transition focus:border-blue-500"
+              className="w-full rounded-2xl border border-white/10 bg-white/[0.03] py-3 pl-10 pr-10 text-white outline-none transition focus:border-blue-500"
             />
             {search && (
               <button
@@ -742,7 +850,7 @@ export default function ProductsPage() {
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+            className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-blue-500"
           >
             {categories.map((category) => (
               <option key={category} value={category}>
@@ -754,7 +862,7 @@ export default function ProductsPage() {
           <select
             value={sortMode}
             onChange={(e) => setSortMode(e.target.value)}
-            className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+            className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-blue-500"
           >
             <option value="name">Ordenar: nombre</option>
             <option value="category">Ordenar: categoría</option>
@@ -762,7 +870,7 @@ export default function ProductsPage() {
             <option value="stock-asc">Ordenar: stock menor</option>
           </select>
 
-          <label className="inline-flex min-h-[48px] items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-200">
+          <label className="inline-flex min-h-[48px] items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-zinc-200">
             <Filter className="h-4 w-4" />
             <span>Solo cambios</span>
             <input
@@ -775,23 +883,23 @@ export default function ProductsPage() {
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <p className="text-sm text-zinc-400">Categorías visibles</p>
-            <p className="mt-1 text-xl font-bold text-white">
+            <p className="mt-1 text-xl font-semibold text-white">
               {groupedProducts.length}
             </p>
           </div>
 
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <p className="text-sm text-zinc-400">Productos visibles</p>
-            <p className="mt-1 text-xl font-bold text-white">
+            <p className="mt-1 text-xl font-semibold text-white">
               {visibleProductsCount}
             </p>
           </div>
 
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <p className="text-sm text-zinc-400">Cambios pendientes</p>
-            <p className="mt-1 text-xl font-bold text-white">{dirtyCount}</p>
+            <p className="mt-1 text-xl font-semibold text-white">{dirtyCount}</p>
           </div>
         </div>
 
@@ -799,8 +907,8 @@ export default function ProductsPage() {
           <div
             className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${
               pageError
-                ? 'border-red-800 bg-red-950/40 text-red-300'
-                : 'border-emerald-800 bg-emerald-950/40 text-emerald-300'
+                ? 'border-red-800 bg-red-950/30 text-red-200'
+                : 'border-emerald-800 bg-emerald-950/30 text-emerald-200'
             }`}
           >
             <div className="flex items-center gap-2">
@@ -811,14 +919,22 @@ export default function ProductsPage() {
         )}
 
         {loading ? (
-          <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6 text-sm text-zinc-400">
+          <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-sm text-zinc-400">
             <div className="flex items-center gap-3">
               <Loader2 className="h-4 w-4 animate-spin" />
               Cargando productos del día...
             </div>
+
+            <button
+              type="button"
+              onClick={loadTodayInventoryFallback}
+              className="mt-4 inline-flex min-h-[40px] items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.06]"
+            >
+              Reintentar
+            </button>
           </div>
         ) : groupedProducts.length === 0 ? (
-          <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6 text-sm text-zinc-400">
+          <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-sm text-zinc-400">
             {hasTodayInventory
               ? 'No hay productos para mostrar con ese filtro.'
               : 'No hay productos cargados para hoy.'}
@@ -831,15 +947,15 @@ export default function ProductsPage() {
               return (
                 <article
                   key={group.id}
-                  className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900/40"
+                  className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.03]"
                 >
                   <button
                     type="button"
                     onClick={() => toggleCategory(group.id)}
-                    className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-zinc-900 sm:px-5"
+                    className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-white/[0.04] sm:px-5"
                   >
                     <div className="min-w-0">
-                      <h3 className="break-words text-base font-bold text-blue-400 sm:text-lg">
+                      <h3 className="break-words text-base font-semibold text-blue-400 sm:text-lg">
                         {group.name}
                       </h3>
                       <p className="mt-1 text-sm text-zinc-400">
@@ -847,7 +963,7 @@ export default function ProductsPage() {
                       </p>
                     </div>
 
-                    <div className="shrink-0 rounded-2xl border border-zinc-800 bg-zinc-950 p-2 text-zinc-300">
+                    <div className="shrink-0 rounded-2xl border border-white/10 bg-black p-2 text-zinc-300">
                       {isExpanded ? (
                         <ChevronUp className="h-4 w-4" />
                       ) : (
@@ -857,7 +973,7 @@ export default function ProductsPage() {
                   </button>
 
                   {isExpanded && (
-                    <div className="border-t border-zinc-800 p-4 sm:p-5">
+                    <div className="border-t border-white/10 p-4 sm:p-5">
                       <div className="grid gap-4">
                         {group.products.map((product) => {
                           const isSaving = savingRowId === product.id;
@@ -866,12 +982,12 @@ export default function ProductsPage() {
                           return (
                             <article
                               key={product.id}
-                              className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4"
+                              className="rounded-[24px] border border-white/10 bg-[#050505] p-4"
                             >
                               <div className="grid gap-3">
                                 <div className="grid gap-3 xl:grid-cols-3">
                                   <div>
-                                    <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
                                       Producto
                                     </label>
                                     <input
@@ -884,12 +1000,12 @@ export default function ProductsPage() {
                                           e.target.value
                                         )
                                       }
-                                      className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
+                                      className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
                                     />
                                   </div>
 
                                   <div>
-                                    <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
                                       Categoría
                                     </label>
                                     <input
@@ -902,12 +1018,12 @@ export default function ProductsPage() {
                                           e.target.value
                                         )
                                       }
-                                      className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
+                                      className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
                                     />
                                   </div>
 
                                   <div>
-                                    <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
                                       Stock
                                     </label>
                                     <input
@@ -921,18 +1037,18 @@ export default function ProductsPage() {
                                           e.target.value
                                         )
                                       }
-                                      className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
+                                      className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
                                     />
                                   </div>
                                 </div>
 
                                 <div className="flex flex-wrap gap-2">
-                                  <span className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1 text-xs font-medium text-zinc-300">
+                                  <span className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-medium text-zinc-300">
                                     Estado: {product.status}
                                   </span>
 
                                   {product.isDirty && (
-                                    <span className="rounded-xl border border-yellow-800 bg-yellow-950/40 px-3 py-1 text-xs font-medium text-yellow-300">
+                                    <span className="rounded-xl border border-yellow-800 bg-yellow-950/30 px-3 py-1 text-xs font-medium text-yellow-300">
                                       Cambio pendiente
                                     </span>
                                   )}
@@ -955,7 +1071,7 @@ export default function ProductsPage() {
                                   <button
                                     onClick={() => removeProduct(product.id)}
                                     disabled={isSaving || isDeleting}
-                                    className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-red-800 bg-red-950/40 px-4 py-3 text-sm font-semibold text-red-300 transition hover:bg-red-900/60 disabled:opacity-60"
+                                    className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-red-800 bg-red-950/30 px-4 py-3 text-sm font-semibold text-red-300 transition hover:bg-red-900/50 disabled:opacity-60"
                                   >
                                     {isDeleting ? (
                                       <Loader2 className="h-4 w-4 animate-spin" />

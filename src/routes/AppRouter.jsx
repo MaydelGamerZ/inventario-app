@@ -14,16 +14,17 @@ import ProductsPage from '../pages/ProductsPage';
  * - Separa rutas públicas y privadas.
  * - Usa ProtectedRoute para todo el panel interno.
  * - Mantiene redirecciones limpias.
- * - Deja un fallback 404 tanto dentro como fuera del layout.
+ * - Usa un 404 dentro del layout para rutas privadas inválidas
+ *   y un 404 global para cualquier otra ruta fuera del panel.
  */
 export default function AppRouter() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Rutas públicas */}
+        {/* Públicas */}
         <Route path="/login" element={<LoginPage />} />
 
-        {/* Rutas privadas */}
+        {/* Privadas */}
         <Route
           path="/"
           element={
@@ -35,25 +36,30 @@ export default function AppRouter() {
           {/* Inicio */}
           <Route index element={<HomePage />} />
 
-          {/* Alias /home -> / */}
+          {/* Alias */}
           <Route path="home" element={<Navigate to="/" replace />} />
 
-          {/* Inventario */}
+          {/* Inventario diario */}
           <Route path="inventario-diario" element={<InventoryDayPage />} />
-          <Route path="inventario/:id" element={<InventoryDetailPage />} />
-          <Route path="inventario/:id/editar" element={<InventoryDetailPage />} />
 
           {/* Historial */}
           <Route path="historial" element={<InventoryHistoryPage />} />
 
-          {/* Productos */}
+          {/* Productos / categorías */}
           <Route path="productos" element={<ProductsPage />} />
 
-          {/* 404 interno dentro del layout */}
+          {/* Inventario detalle / edición */}
+          <Route path="inventario/:id" element={<InventoryDetailPage />} />
+          <Route
+            path="inventario/:id/editar"
+            element={<InventoryDetailPage />}
+          />
+
+          {/* 404 dentro del panel */}
           <Route path="*" element={<NotFoundPage />} />
         </Route>
 
-        {/* Fallback global */}
+        {/* 404 fuera del panel */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </BrowserRouter>
