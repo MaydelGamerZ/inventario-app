@@ -36,6 +36,7 @@ import {
   subscribeAllInventories,
   startInventoryCount,
 } from '../services/inventory';
+import CustomSelect from '../components/CustomSelect';
 import { exportInventoryToPDF } from '../services/pdfExporter';
 
 function getTodayDateKey() {
@@ -388,6 +389,12 @@ function StatCard({
     </div>
   );
 }
+
+const SORT_MODE_OPTIONS = [
+  { value: 'counted-first', label: 'Ordenar: contados primero' },
+  { value: 'difference', label: 'Ordenar: mayor diferencia' },
+  { value: 'name', label: 'Ordenar: nombre' },
+];
 
 export default function InventoryDayPage() {
   const { user } = useAuth();
@@ -1209,19 +1216,12 @@ export default function InventoryDayPage() {
                     />
                   </label>
 
-                  <select
+                  <CustomSelect
                     value={sortMode}
-                    onChange={(e) => setSortMode(e.target.value)}
-                    className="min-h-[44px] rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-white outline-none"
-                  >
-                    <option value="counted-first">
-                      Ordenar: contados primero
-                    </option>
-                    <option value="difference">
-                      Ordenar: mayor diferencia
-                    </option>
-                    <option value="name">Ordenar: nombre</option>
-                  </select>
+                    onChange={setSortMode}
+                    options={SORT_MODE_OPTIONS}
+                    className="min-w-[240px]"
+                  />
 
                   <button
                     type="button"
