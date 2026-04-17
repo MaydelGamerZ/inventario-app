@@ -4,63 +4,31 @@ import {
   ClipboardList,
   Boxes,
   History,
-  FileText,
   ChevronRight,
-  Sparkles,
-  Smartphone,
   CheckCircle2,
-  CalendarDays,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 
-function QuickAccessCard({
-  to,
-  icon,
-  title,
-  description,
-  accent = 'default',
-  isDisabled = false,
-}) {
-  const accentClasses =
-    accent === 'blue'
-      ? 'text-blue-400 bg-blue-600/15 group-hover:border-blue-500'
-      : accent === 'emerald'
-        ? 'text-emerald-400 bg-emerald-600/15 group-hover:border-emerald-500'
-        : accent === 'yellow'
-          ? 'text-yellow-400 bg-yellow-600/15 group-hover:border-yellow-500'
-          : 'text-zinc-300 bg-zinc-800 group-hover:border-zinc-600';
-
-  if (isDisabled) {
-    return (
-      <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/60 p-4 opacity-90">
-        <div className="flex items-start justify-between gap-3">
-          <div
-            className={`flex h-12 w-12 items-center justify-center rounded-xl ${accentClasses}`}
-          >
-            {icon}
-          </div>
-          <span className="rounded-full border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-zinc-400">
-            Próximamente
-          </span>
-        </div>
-
-        <div className="mt-4">
-          <p className="font-semibold text-white">{title}</p>
-          <p className="mt-1 text-sm leading-6 text-zinc-400">{description}</p>
-        </div>
-      </div>
-    );
-  }
-
+function QuickActionCard({ to, icon, title, description, primary = false }) {
   return (
     <Link
       to={to}
-      className="group rounded-2xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
+      className={[
+        'group rounded-2xl border p-4 transition',
+        primary
+          ? 'border-blue-500/30 bg-blue-600/10 hover:bg-blue-600/15'
+          : 'border-zinc-800 bg-zinc-900 hover:bg-zinc-800',
+      ].join(' ')}
     >
       <div className="flex items-start justify-between gap-3">
         <div
-          className={`flex h-12 w-12 items-center justify-center rounded-xl ${accentClasses}`}
+          className={[
+            'flex h-11 w-11 items-center justify-center rounded-xl',
+            primary
+              ? 'bg-blue-600/20 text-blue-300'
+              : 'bg-zinc-800 text-zinc-200',
+          ].join(' ')}
         >
           {icon}
         </div>
@@ -79,20 +47,47 @@ function QuickAccessCard({
   );
 }
 
-function StatusBadge({ children, tone = 'default' }) {
+function MiniStatus({ icon, label, value, tone = 'default' }) {
   const toneClasses =
     tone === 'success'
-      ? 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400'
+      ? 'bg-emerald-600/10 text-emerald-300'
       : tone === 'info'
-        ? 'border-blue-900/60 bg-blue-950/50 text-blue-300'
-        : 'border-zinc-800 bg-zinc-900 text-zinc-300';
+        ? 'bg-blue-600/10 text-blue-300'
+        : 'bg-zinc-800 text-zinc-200';
 
   return (
-    <span
-      className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${toneClasses}`}
-    >
-      {children}
-    </span>
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+      <div className="flex items-center gap-3">
+        <div
+          className={`flex h-10 w-10 items-center justify-center rounded-xl ${toneClasses}`}
+        >
+          {icon}
+        </div>
+
+        <div className="min-w-0">
+          <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+            {label}
+          </p>
+          <p className="truncate font-semibold text-white">{value}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StepCard({ step, title, description }) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+      <div className="flex items-center gap-2 text-blue-400">
+        <CheckCircle2 size={16} />
+        <p className="text-xs font-semibold uppercase tracking-[0.18em]">
+          Paso {step}
+        </p>
+      </div>
+
+      <h3 className="mt-3 text-base font-semibold text-white">{title}</h3>
+      <p className="mt-2 text-sm leading-6 text-zinc-400">{description}</p>
+    </div>
   );
 }
 
@@ -103,23 +98,22 @@ export default function HomePage() {
 
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      {/* Hero principal */}
-      <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 p-5 shadow-sm sm:p-6 lg:p-7">
-        <div className="grid gap-6 lg:grid-cols-[1.5fr_0.9fr] lg:items-center">
+      {/* Cabecera principal */}
+      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6 lg:p-7">
+        <div className="grid gap-5 xl:grid-cols-[1.35fr_0.9fr] xl:items-center">
           <div className="max-w-3xl">
             <div className="inline-flex items-center gap-2 rounded-full border border-blue-900/60 bg-blue-950/40 px-3 py-1 text-xs font-medium text-blue-300">
-              <Sparkles size={14} />
+              <ShieldCheck size={14} />
               Panel principal
             </div>
 
-            <h1 className="mt-4 text-3xl font-bold leading-tight text-white sm:text-4xl lg:text-5xl">
+            <h1 className="mt-4 text-3xl font-bold leading-tight text-white sm:text-4xl">
               Sistema de Inventario
             </h1>
 
-            <p className="mt-3 text-sm leading-7 text-zinc-400 sm:text-base">
-              Desde aquí puedes entrar al inventario diario, revisar productos,
-              consultar historial y trabajar más rápido desde teléfono o
-              computadora sin perder el flujo del conteo.
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-400 sm:text-base">
+              Entra al inventario diario, revisa productos o consulta historial
+              sin perder tiempo entre pantallas innecesarias.
             </p>
 
             <div className="mt-5 flex flex-wrap gap-3">
@@ -146,228 +140,91 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5">
-            <p className="text-sm text-zinc-400">Resumen rápido</p>
-
-            <div className="mt-4 grid gap-3">
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-xl bg-zinc-900 p-2 text-blue-400">
-                    <User size={18} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs uppercase tracking-wide text-zinc-500">
-                      Usuario
-                    </p>
-                    <p className="truncate font-semibold text-white">
-                      {userName}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-xl bg-emerald-950 p-2 text-emerald-400">
-                    <ShieldCheck size={18} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs uppercase tracking-wide text-zinc-500">
-                      Estado
-                    </p>
-                    <p className="font-semibold text-white">Sistema activo</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-xl bg-zinc-900 p-2 text-zinc-300">
-                    <Smartphone size={18} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs uppercase tracking-wide text-zinc-500">
-                      Uso recomendado
-                    </p>
-                    <p className="font-semibold text-white">
-                      Teléfono y escritorio
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
+          <div className="grid gap-3">
+            <MiniStatus
+              icon={<User size={18} />}
+              label="Usuario"
+              value={userName}
+              tone="default"
+            />
+            <MiniStatus
+              icon={<ShieldCheck size={18} />}
+              label="Estado"
+              value="Sistema activo"
+              tone="success"
+            />
+            <MiniStatus
+              icon={<ClipboardList size={18} />}
+              label="Siguiente acción"
+              value="Trabajar inventario diario"
+              tone="info"
+            />
           </div>
         </div>
       </section>
 
-      {/* Tarjetas usuario / sistema */}
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
-          <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-zinc-900 text-zinc-200">
-              <User size={24} />
-            </div>
-
-            <div className="min-w-0">
-              <p className="text-sm text-zinc-400">Usuario actual</p>
-
-              <h2 className="mt-1 truncate text-xl font-bold text-white sm:text-2xl">
-                {userName}
-              </h2>
-
-              <p className="mt-2 break-all text-sm text-zinc-400">
-                {user?.email || 'Sin correo'}
-              </p>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                <StatusBadge tone="success">Sesión iniciada</StatusBadge>
-                <StatusBadge tone="info">Acceso autorizado</StatusBadge>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
-          <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-950 text-emerald-400">
-              <ShieldCheck size={24} />
-            </div>
-
-            <div className="min-w-0">
-              <p className="text-sm text-zinc-400">Estado del sistema</p>
-
-              <h2 className="mt-1 text-xl font-bold text-emerald-400 sm:text-2xl">
-                Activo
-              </h2>
-
-              <p className="mt-2 text-sm leading-7 text-zinc-400">
-                Login, rutas protegidas e inventario base listos para trabajar.
-              </p>
-
-              <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300">
-                  Auth lista
-                </div>
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300">
-                  App web móvil
-                </div>
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300">
-                  Inventario diario
-                </div>
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300">
-                  Historial listo
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Accesos rápidos */}
+      {/* Acciones principales */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
         <div className="mb-4">
-          <h2 className="text-xl font-bold text-white">Accesos rápidos</h2>
+          <h2 className="text-xl font-bold text-white">Acceso rápido</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Entra rápido a las pantallas más usadas del sistema.
+            Estas son las áreas que realmente vas a usar más seguido.
           </p>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <QuickAccessCard
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <QuickActionCard
             to="/inventario-diario"
             icon={<ClipboardList size={22} />}
             title="Inventario diario"
-            description="Captura, revisa y continúa el conteo físico del día."
-            accent="blue"
+            description="Captura, corrige y continúa el conteo físico del día."
+            primary
           />
 
-          <QuickAccessCard
+          <QuickActionCard
             to="/productos"
             icon={<Boxes size={22} />}
             title="Productos y categorías"
-            description="Administra el inventario base, productos y estructura."
-            accent="default"
+            description="Revisa estructura base, productos y organización."
           />
 
-          <QuickAccessCard
+          <QuickActionCard
             to="/historial"
             icon={<History size={22} />}
-            title="Historial"
-            description="Consulta inventarios guardados y revisa fechas anteriores."
-            accent="default"
-          />
-
-          <QuickAccessCard
-            to="#"
-            icon={<FileText size={22} />}
-            title="Importación PDF"
-            description="Espacio preparado para conectar la carga del archivo oficial."
-            accent="yellow"
-            isDisabled
+            title="Historial de inventarios"
+            description="Consulta inventarios anteriores y revisa seguimiento."
           />
         </div>
       </section>
 
-      {/* Flujo recomendado */}
+      {/* Flujo real */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
         <div className="mb-4">
-          <h2 className="text-xl font-bold text-white">Flujo recomendado</h2>
+          <h2 className="text-xl font-bold text-white">Orden recomendado</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Orden práctico para usar el sistema sin perder tiempo.
+            Así debería usarse el sistema para trabajar más rápido y con menos
+            errores.
           </p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-            <div className="flex items-center gap-2 text-blue-400">
-              <CheckCircle2 size={16} />
-              <p className="text-xs font-semibold uppercase tracking-wider">
-                Paso 1
-              </p>
-            </div>
+          <StepCard
+            step="1"
+            title="Revisar productos"
+            description="Valida que el catálogo y las categorías estén correctos antes de contar."
+          />
 
-            <h3 className="mt-2 text-base font-semibold text-white">
-              Revisar catálogo
-            </h3>
+          <StepCard
+            step="2"
+            title="Trabajar inventario diario"
+            description="Captura cantidades, estados y observaciones del conteo físico."
+          />
 
-            <p className="mt-2 text-sm leading-6 text-zinc-400">
-              Verifica productos y categorías antes de contar o corregir.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-            <div className="flex items-center gap-2 text-blue-400">
-              <CalendarDays size={16} />
-              <p className="text-xs font-semibold uppercase tracking-wider">
-                Paso 2
-              </p>
-            </div>
-
-            <h3 className="mt-2 text-base font-semibold text-white">
-              Trabajar el inventario diario
-            </h3>
-
-            <p className="mt-2 text-sm leading-6 text-zinc-400">
-              Captura cantidades, observaciones y avanza con el conteo físico.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-            <div className="flex items-center gap-2 text-blue-400">
-              <History size={16} />
-              <p className="text-xs font-semibold uppercase tracking-wider">
-                Paso 3
-              </p>
-            </div>
-
-            <h3 className="mt-2 text-base font-semibold text-white">
-              Consultar historial
-            </h3>
-
-            <p className="mt-2 text-sm leading-6 text-zinc-400">
-              Revisa inventarios guardados para validar cambios y seguimiento.
-            </p>
-          </div>
+          <StepCard
+            step="3"
+            title="Consultar historial"
+            description="Revisa inventarios guardados para comparar cambios y seguimiento."
+          />
         </div>
       </section>
     </div>

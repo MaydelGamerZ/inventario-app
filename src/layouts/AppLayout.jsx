@@ -5,7 +5,6 @@ import Sidebar from '../components/Sidebar';
 
 const DESKTOP_EXPANDED_WIDTH = 290;
 const DESKTOP_COLLAPSED_WIDTH = 92;
-const MOBILE_HEADER_HEIGHT = 64;
 
 export default function AppLayout() {
   const location = useLocation();
@@ -17,29 +16,9 @@ export default function AppLayout() {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  const desktopSidebarWidth = useMemo(() => {
+  const sidebarWidth = useMemo(() => {
     return desktopCollapsed ? DESKTOP_COLLAPSED_WIDTH : DESKTOP_EXPANDED_WIDTH;
   }, [desktopCollapsed]);
-
-  const desktopMainStyle = useMemo(() => {
-    return {
-      marginLeft: `${desktopSidebarWidth}px`,
-    };
-  }, [desktopSidebarWidth]);
-
-  const desktopToggleStyle = useMemo(() => {
-    return {
-      left: `${desktopSidebarWidth - 18}px`,
-    };
-  }, [desktopSidebarWidth]);
-
-  const handleOpenMobileMenu = () => {
-    setMobileOpen(true);
-  };
-
-  const handleCloseMobileMenu = () => {
-    setMobileOpen(false);
-  };
 
   const handleToggleDesktopSidebar = () => {
     setDesktopCollapsed((prev) => !prev);
@@ -47,81 +26,53 @@ export default function AppLayout() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Header móvil */}
+      {/* HEADER MOBILE (más compacto) */}
       <header
         className="
           sticky top-0 z-40 lg:hidden
+          flex items-center justify-between
+          h-[56px]
+          px-3
           border-b border-white/10
-          bg-black/95 backdrop-blur-xl
-          pt-[env(safe-area-inset-top)]
+          bg-black/90 backdrop-blur
         "
       >
-        <div
+        <button
+          onClick={() => setMobileOpen(true)}
           className="
-            flex items-center justify-between
-            px-3
-            pl-[max(0.75rem,env(safe-area-inset-left))]
-            pr-[max(0.75rem,env(safe-area-inset-right))]
+            flex h-10 w-10 items-center justify-center
+            rounded-xl border border-white/10
+            bg-zinc-900
           "
-          style={{ minHeight: `${MOBILE_HEADER_HEIGHT}px` }}
         >
-          <button
-            type="button"
-            onClick={handleOpenMobileMenu}
-            className="
-              inline-flex h-11 w-11 items-center justify-center
-              rounded-2xl border border-white/10
-              bg-zinc-950 text-zinc-100
-              shadow-[0_8px_30px_rgba(0,0,0,0.35)]
-              transition
-              hover:bg-zinc-900
-              active:scale-[0.98]
-            "
-            aria-label="Abrir menú"
-          >
-            <Menu size={20} />
-          </button>
+          <Menu size={20} />
+        </button>
 
-          <div className="min-w-0 flex-1 px-3 text-center">
-            <p className="truncate text-[11px] font-medium uppercase tracking-[0.22em] text-zinc-500">
-              Sistema de inventario
-            </p>
-            <h1 className="truncate text-base font-semibold tracking-tight text-white">
-              Panel principal
-            </h1>
-          </div>
+        <p className="text-sm font-semibold text-white truncate">Inventario</p>
 
-          <div className="h-11 w-11 shrink-0" />
-        </div>
+        <div className="w-10" />
       </header>
 
-      {/* Sidebar escritorio */}
+      {/* SIDEBAR DESKTOP */}
       <div className="hidden lg:block">
         <Sidebar
           collapsed={desktopCollapsed}
           mobileOpen={false}
           onClose={() => {}}
           onNavigate={() => {}}
-          onToggleCollapse={handleToggleDesktopSidebar}
         />
 
         <button
-          type="button"
           onClick={handleToggleDesktopSidebar}
-          style={desktopToggleStyle}
+          style={{ left: `${sidebarWidth - 18}px` }}
           className="
-            fixed top-5 z-[70] hidden lg:inline-flex
-            h-11 w-11 items-center justify-center
-            rounded-2xl border border-white/10
-            bg-zinc-950/95 text-zinc-300
-            shadow-[0_12px_35px_rgba(0,0,0,0.45)]
-            backdrop-blur
-            transition-all duration-300 ease-out
-            hover:bg-zinc-900 hover:text-white
-            active:scale-[0.98]
+            fixed top-4 z-50
+            h-10 w-10
+            hidden lg:flex
+            items-center justify-center
+            rounded-xl border border-white/10
+            bg-zinc-900
           "
-          aria-label={desktopCollapsed ? 'Expandir menú' : 'Colapsar menú'}
-          title={desktopCollapsed ? 'Expandir menú' : 'Colapsar menú'}
         >
           {desktopCollapsed ? (
             <ChevronRight size={18} />
@@ -131,39 +82,41 @@ export default function AppLayout() {
         </button>
       </div>
 
-      {/* Sidebar móvil */}
-      <div className="lg:hidden">
-        <Sidebar
-          collapsed={false}
-          mobileOpen={mobileOpen}
-          onClose={handleCloseMobileMenu}
-          onNavigate={handleCloseMobileMenu}
-        />
-      </div>
+      {/* SIDEBAR MOBILE */}
+      <Sidebar
+        collapsed={false}
+        mobileOpen={mobileOpen}
+        onClose={() => setMobileOpen(false)}
+        onNavigate={() => setMobileOpen(false)}
+      />
 
-      {/* Contenido principal */}
+      {/* MAIN */}
       <main
-        style={desktopMainStyle}
+        style={{
+          marginLeft: window.innerWidth >= 1024 ? `${sidebarWidth}px` : 0,
+        }}
         className="
-          min-h-[calc(100dvh-64px-env(safe-area-inset-top))]
-          lg:min-h-screen
-          transition-all duration-300 ease-out
+          min-h-screen
+          transition-all duration-300
         "
       >
         <div
           className="
-            mx-auto w-full max-w-screen-2xl
-            px-3 py-3
-            sm:px-5 sm:py-5
-            lg:px-8 lg:py-8
-            pb-[max(1rem,env(safe-area-inset-bottom))]
-            pl-[max(0.75rem,env(safe-area-inset-left))]
-            pr-[max(0.75rem,env(safe-area-inset-right))]
+            w-full
+            max-w-screen-xl
+            mx-auto
+
+            px-3
+            py-3
+
+            sm:px-4
+            sm:py-4
+
+            lg:px-6
+            lg:py-6
           "
         >
-          <div className="w-full min-w-0">
-            <Outlet />
-          </div>
+          <Outlet />
         </div>
       </main>
     </div>
