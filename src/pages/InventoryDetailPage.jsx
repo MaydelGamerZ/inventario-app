@@ -901,9 +901,9 @@ export default function InventoryDetailPage() {
               </div>
             </div>
 
-            <div className="sticky top-[calc(56px+env(safe-area-inset-top)+12px)] z-20 mt-4 rounded-[26px] border border-white/10 bg-black/95 p-4 backdrop-blur lg:top-4">
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 xl:flex-1">
+            <div className="mt-4 rounded-[26px] border border-white/10 bg-black p-4">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                <div className="sticky top-[calc(56px+env(safe-area-inset-top)+12px)] z-20 flex items-center gap-3 rounded-2xl border border-white/10 bg-black/95 px-4 py-3 backdrop-blur xl:flex-1 lg:top-4">
                   <Search size={18} className="shrink-0 text-zinc-500" />
                   <input
                     type="text"
@@ -923,15 +923,17 @@ export default function InventoryDetailPage() {
                   )}
                 </div>
 
-                <InventoryControlsMenu
-                  sortMode={sortMode}
-                  onSortChange={setSortMode}
-                  sortOptions={SORT_MODE_OPTIONS}
-                  showOnlyCounted={showOnlyCounted}
-                  onToggleShowOnlyCounted={setShowOnlyCounted}
-                  onExpandAll={expandAll}
-                  onCollapseAll={collapseAll}
-                />
+                <div className="shrink-0">
+                  <InventoryControlsMenu
+                    sortMode={sortMode}
+                    onSortChange={setSortMode}
+                    sortOptions={SORT_MODE_OPTIONS}
+                    showOnlyCounted={showOnlyCounted}
+                    onToggleShowOnlyCounted={setShowOnlyCounted}
+                    onExpandAll={expandAll}
+                    onCollapseAll={collapseAll}
+                  />
+                </div>
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

@@ -39,7 +39,7 @@ export default function InventoryControlsMenu({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative sm:min-w-[240px]">
+    <div ref={rootRef} className="relative sm:min-w-[280px]">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
@@ -65,99 +65,80 @@ export default function InventoryControlsMenu({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(92vw,360px)] overflow-hidden rounded-[28px] border border-white/10 bg-[#050505] shadow-[0_22px_60px_rgba(0,0,0,0.6)]">
-          <div className="border-b border-white/10 px-4 py-4">
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/25 bg-blue-500/10 px-3 py-1 text-[11px] font-medium text-blue-300">
-              <Filter size={13} />
-              Panel de control
-            </div>
-            <p className="mt-3 text-lg font-semibold text-white">
-              Filtros del inventario
-            </p>
-            <p className="mt-1 text-sm text-zinc-500">
-              Ajusta la vista sin salir del conteo.
-            </p>
-          </div>
+        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(92vw,360px)] rounded-[28px] border border-white/10 bg-[#050505] p-3 shadow-[0_22px_60px_rgba(0,0,0,0.6)]">
+          <div className="space-y-1.5">
+            <label className="flex min-h-[58px] items-center justify-between gap-3 rounded-2xl border border-white/10 px-4 py-3 text-left text-zinc-200">
+              <span className="inline-flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
+                  <Filter size={16} />
+                </span>
+                <span className="flex flex-col">
+                  <span className="text-[15px] font-medium">Solo contados</span>
+                  <span className="text-xs text-zinc-500">
+                    Mostrar solo productos capturados
+                  </span>
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={showOnlyCounted}
+                onChange={(e) => onToggleShowOnlyCounted?.(e.target.checked)}
+                className="h-4 w-4 accent-blue-600"
+              />
+            </label>
 
-          <div className="space-y-4 p-4">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-white">Solo contados</p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    Muestra unicamente productos con captura.
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={showOnlyCounted}
-                  onChange={(e) => onToggleShowOnlyCounted?.(e.target.checked)}
-                  className="h-4 w-4 accent-blue-600"
-                />
-              </div>
-            </div>
-
-            <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
-                Orden
-              </p>
+            <div className="rounded-2xl border border-white/10 p-2">
               <CustomSelect
                 value={sortMode}
                 onChange={onSortChange}
                 options={sortOptions}
-                buttonClassName="min-h-[52px] bg-white/[0.03]"
+                buttonClassName="min-h-[54px] border-0 bg-transparent hover:bg-white/[0.045]"
               />
             </div>
 
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
-                Visibilidad
-              </p>
-
-              <button
-                type="button"
-                onClick={() => {
-                  onExpandAll?.();
-                  setOpen(false);
-                }}
-                className="group flex min-h-[54px] w-full items-center justify-between rounded-2xl border border-white/10 px-4 py-3 text-left text-zinc-200 transition hover:bg-white/[0.045] hover:text-white"
-              >
-                <span className="inline-flex items-center gap-3">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
-                    <ChevronDown size={16} />
-                  </span>
-                  <span className="flex flex-col">
-                    <span className="text-[15px] font-medium">Expandir todo</span>
-                    <span className="text-xs text-zinc-500 group-hover:text-zinc-400">
-                      Abre todas las categorias visibles.
-                    </span>
+            <button
+              type="button"
+              onClick={() => {
+                onExpandAll?.();
+                setOpen(false);
+              }}
+              className="group flex min-h-[58px] w-full items-center justify-between rounded-2xl border border-white/10 px-4 py-3 text-left text-zinc-200 transition hover:bg-white/[0.045] hover:text-white"
+            >
+              <span className="inline-flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
+                  <ChevronDown size={16} />
+                </span>
+                <span className="flex flex-col">
+                  <span className="text-[15px] font-medium">Expandir todo</span>
+                  <span className="text-xs text-zinc-500 group-hover:text-zinc-400">
+                    Abrir categorias visibles
                   </span>
                 </span>
-                <ChevronDown size={16} className="text-zinc-500" />
-              </button>
+              </span>
+              <ChevronDown size={16} className="text-zinc-500" />
+            </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  onCollapseAll?.();
-                  setOpen(false);
-                }}
-                className="group flex min-h-[54px] w-full items-center justify-between rounded-2xl border border-white/10 px-4 py-3 text-left text-zinc-200 transition hover:bg-white/[0.045] hover:text-white"
-              >
-                <span className="inline-flex items-center gap-3">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
-                    <ChevronUp size={16} />
-                  </span>
-                  <span className="flex flex-col">
-                    <span className="text-[15px] font-medium">Contraer todo</span>
-                    <span className="text-xs text-zinc-500 group-hover:text-zinc-400">
-                      Cierra todas las categorias visibles.
-                    </span>
+            <button
+              type="button"
+              onClick={() => {
+                onCollapseAll?.();
+                setOpen(false);
+              }}
+              className="group flex min-h-[58px] w-full items-center justify-between rounded-2xl border border-white/10 px-4 py-3 text-left text-zinc-200 transition hover:bg-white/[0.045] hover:text-white"
+            >
+              <span className="inline-flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
+                  <ChevronUp size={16} />
+                </span>
+                <span className="flex flex-col">
+                  <span className="text-[15px] font-medium">Contraer todo</span>
+                  <span className="text-xs text-zinc-500 group-hover:text-zinc-400">
+                    Cerrar categorias visibles
                   </span>
                 </span>
-                <ChevronDown size={16} className="rotate-180 text-zinc-500" />
-              </button>
-            </div>
+              </span>
+              <ChevronDown size={16} className="rotate-180 text-zinc-500" />
+            </button>
           </div>
         </div>
       )}
