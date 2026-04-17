@@ -7,6 +7,7 @@ export default function CustomSelect({
   options = [],
   placeholder = 'Selecciona una opcion',
   disabled = false,
+  leadingIcon = null,
   className = '',
   buttonClassName = '',
   menuClassName = '',
@@ -65,8 +66,9 @@ export default function CustomSelect({
           buttonClassName,
         ].join(' ')}
       >
-        <span className="truncate">
-          {selectedOption?.label || placeholder}
+        <span className="flex min-w-0 items-center gap-3">
+          {leadingIcon}
+          <span className="truncate">{selectedOption?.label || placeholder}</span>
         </span>
 
         <ChevronDown

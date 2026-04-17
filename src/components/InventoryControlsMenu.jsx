@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, Filter } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Eye,
+  Filter,
+  Rows3,
+} from 'lucide-react';
 import CustomSelect from './CustomSelect';
 
 export default function InventoryControlsMenu({
@@ -43,10 +50,10 @@ export default function InventoryControlsMenu({
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex min-h-[54px] w-full items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#050505] px-4 py-3 text-sm font-medium text-white transition hover:border-white/20 hover:bg-white/[0.045]"
+        className="group inline-flex min-h-[54px] w-full items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#050505] px-4 py-3 text-sm font-medium text-zinc-300 transition hover:bg-white/[0.045] hover:text-white"
       >
         <span className="inline-flex min-w-0 items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-zinc-300">
+          <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-zinc-300 transition group-hover:text-white">
             <Filter size={16} />
           </span>
           <span className="flex min-w-0 flex-col text-left">
@@ -58,19 +65,19 @@ export default function InventoryControlsMenu({
             </span>
           </span>
         </span>
-        <ChevronDown
+        <ChevronRight
           size={18}
-          className={`shrink-0 text-zinc-400 transition ${open ? 'rotate-180' : ''}`}
+          className={`shrink-0 text-zinc-500 transition group-hover:text-zinc-300 ${open ? 'rotate-90' : ''}`}
         />
       </button>
 
       {open && (
         <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(92vw,360px)] rounded-[28px] border border-white/10 bg-[#050505] p-3 shadow-[0_22px_60px_rgba(0,0,0,0.6)]">
           <div className="space-y-1.5">
-            <label className="flex min-h-[58px] items-center justify-between gap-3 rounded-2xl border border-white/10 px-4 py-3 text-left text-zinc-200">
+            <label className="group flex min-h-[58px] items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left text-zinc-300 transition hover:bg-white/[0.045] hover:text-white">
               <span className="inline-flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
-                  <Filter size={16} />
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-zinc-300 transition group-hover:text-white">
+                  <Eye size={16} />
                 </span>
                 <span className="flex flex-col">
                   <span className="text-[15px] font-medium">Solo contados</span>
@@ -87,12 +94,17 @@ export default function InventoryControlsMenu({
               />
             </label>
 
-            <div className="rounded-2xl border border-white/10 p-2">
+            <div className="rounded-2xl transition hover:bg-white/[0.045]">
               <CustomSelect
                 value={sortMode}
                 onChange={onSortChange}
                 options={sortOptions}
-                buttonClassName="min-h-[54px] border-0 bg-transparent hover:bg-white/[0.045]"
+                buttonClassName="min-h-[58px] border-0 bg-transparent px-4 py-3 hover:bg-transparent"
+                leadingIcon={
+                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-zinc-300">
+                    <Rows3 size={16} />
+                  </span>
+                }
               />
             </div>
 
@@ -102,10 +114,10 @@ export default function InventoryControlsMenu({
                 onExpandAll?.();
                 setOpen(false);
               }}
-              className="group flex min-h-[58px] w-full items-center justify-between rounded-2xl border border-white/10 px-4 py-3 text-left text-zinc-200 transition hover:bg-white/[0.045] hover:text-white"
+              className="group flex min-h-[58px] w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-zinc-300 transition hover:bg-white/[0.045] hover:text-white"
             >
               <span className="inline-flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-zinc-300 transition group-hover:text-white">
                   <ChevronDown size={16} />
                 </span>
                 <span className="flex flex-col">
@@ -124,10 +136,10 @@ export default function InventoryControlsMenu({
                 onCollapseAll?.();
                 setOpen(false);
               }}
-              className="group flex min-h-[58px] w-full items-center justify-between rounded-2xl border border-white/10 px-4 py-3 text-left text-zinc-200 transition hover:bg-white/[0.045] hover:text-white"
+              className="group flex min-h-[58px] w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-zinc-300 transition hover:bg-white/[0.045] hover:text-white"
             >
               <span className="inline-flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-zinc-300 transition group-hover:text-white">
                   <ChevronUp size={16} />
                 </span>
                 <span className="flex flex-col">

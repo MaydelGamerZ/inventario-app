@@ -802,6 +802,30 @@ export default function InventoryDetailPage() {
             </section>
           )}
 
+          <section className="sticky top-[calc(56px+env(safe-area-inset-top)+8px)] z-30 lg:top-4">
+            <div className="rounded-2xl border border-white/10 bg-black/95 shadow-[0_16px_40px_rgba(0,0,0,0.35)] backdrop-blur">
+              <div className="flex items-center gap-3 px-4 py-3">
+                <Search size={18} className="shrink-0 text-zinc-500" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar producto, categorÃ­a, proveedor, observaciÃ³n o cantidad..."
+                  className="w-full bg-transparent text-sm text-white outline-none placeholder:text-zinc-500"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    className="text-zinc-500 transition hover:text-white"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
+          </section>
+
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <StatCard
               icon={CalendarDays}
@@ -902,7 +926,7 @@ export default function InventoryDetailPage() {
             </div>
 
             <div className="mt-4 rounded-[26px] border border-white/10 bg-black p-4">
-              <div className="sticky top-[calc(56px+env(safe-area-inset-top)+12px)] z-20 rounded-2xl border border-white/10 bg-black/95 backdrop-blur lg:top-4">
+              <div className="hidden">
                 <div className="flex items-center gap-3 px-4 py-3">
                   <Search size={18} className="shrink-0 text-zinc-500" />
                   <input
@@ -924,7 +948,7 @@ export default function InventoryDetailPage() {
                 </div>
               </div>
 
-              <div className="mt-3 flex justify-end">
+              <div className="flex justify-end">
                 <div className="w-full sm:w-auto">
                   <InventoryControlsMenu
                     sortMode={sortMode}
