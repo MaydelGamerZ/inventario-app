@@ -267,8 +267,10 @@ function normalizeCategories(categories = []) {
       cleanText(category.categoryRaw) ||
       cleanText(category.categoryName) ||
       `Categoría ${index + 1}`,
-    totalUnits: safeNumber(category.totalUnits),
-    totalUnavailable: safeNumber(category.totalUnavailable),
+    totalUnits: safeNumber(category.totalUnits ?? category.quantityTotal),
+    totalUnavailable: safeNumber(
+      category.totalUnavailable ?? category.noDisponibleTotal
+    ),
     itemCount: safeNumber(category.itemCount),
   }));
 }
@@ -449,6 +451,37 @@ export function subscribeInventoryByDate(dateKey, callback) {
 }
 
 /**
+ * Obtiene inventario por fecha.
+ */
+export async function getInventoryByDate(dateKey) {
+  const cleanDateKey = cleanText(dateKey);
+
+  if (!cleanDateKey) {
+    return null;
+  }
+
+  const directSnap = await getDoc(doc(db, INVENTORIES_COLLECTION, cleanDateKey));
+
+  if (directSnap.exists()) {
+    return normalizeInventoryDoc(directSnap);
+  }
+
+  const q = query(
+    collection(db, INVENTORIES_COLLECTION),
+    where('dateKey', '==', cleanDateKey),
+    limit(1)
+  );
+
+  const snapshot = await getDocs(q);
+
+  if (snapshot.empty) {
+    return null;
+  }
+
+  return normalizeInventoryDoc(snapshot.docs[0]);
+}
+
+/**
  * Suscripción a todos los inventarios.
  *
  * CLAVE:
@@ -491,6 +524,65 @@ export async function getInventoryById(inventoryId) {
   }
 
   return normalizeInventoryDoc(snap);
+}
+
+/**
+ * Actualiza un inventario existente con compatibilidad para pantallas antiguas.
+ */
+export async function updateInventory(inventoryId, updates = {}) {
+  const cleanId = cleanText(inventoryId);
+
+  if (!cleanId) {
+    throw new Error('ID de inventario invÃ¡lido.');
+  }
+
+  const ref = doc(db, INVENTORIES_COLLECTION, cleanId);
+  const snap = await getDoc(ref);
+
+  if (!snap.exists()) {
+    throw new Error('No se encontrÃ³ el inventario.');
+  }
+
+  const currentInventory = normalizeInventoryDoc(snap);
+  const itemsSource = Array.isArray(updates.items)
+    ? updates.items
+    : currentInventory.items;
+  const items = itemsSource.map((item, index) =>
+    recalculateItem(normalizeInventoryItem(item, index))
+  );
+  const totals = buildInventoryTotals(items);
+  const categories = normalizeCategories(
+    Array.isArray(updates.categories) ? updates.categories : currentInventory.categories
+  );
+
+  await updateDoc(ref, {
+    dateKey: cleanText(updates.dateKey || currentInventory.dateKey || cleanId),
+    dateLabel: cleanText(updates.dateLabel || currentInventory.dateLabel),
+    date: cleanText(
+      updates.date || currentInventory.date || currentInventory.dateLabel
+    ),
+    week: cleanText(updates.week || currentInventory.week),
+    cedis: cleanText(updates.cedis || currentInventory.cedis),
+    sourceFileName: cleanText(
+      updates.sourceFileName || currentInventory.sourceFileName
+    ),
+    items,
+    categories,
+    totals: {
+      ...(currentInventory.totals || {}),
+      ...(updates.totals || {}),
+      ...totals,
+    },
+    totalGeneral: safeNumber(updates.totalGeneral) || totals.totalExpected,
+    totalGeneralNoDisponible:
+      safeNumber(updates.totalGeneralNoDisponible) || totals.totalUnavailable,
+    countingStarted:
+      typeof updates.countingStarted === 'boolean'
+        ? updates.countingStarted
+        : currentInventory.countingStarted,
+    status: cleanText(updates.status || currentInventory.status || 'BORRADOR').toUpperCase(),
+    updatedAt: serverTimestamp(),
+  });
 }
 
 /**
