@@ -1217,8 +1217,8 @@ export default function InventoryDayPage() {
             </div>
 
             <div className="rounded-[26px] border border-white/10 bg-black p-4">
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                <div className="sticky top-[calc(56px+env(safe-area-inset-top)+12px)] z-20 flex items-center gap-3 rounded-2xl border border-white/10 bg-black/95 px-4 py-3 backdrop-blur xl:flex-1 lg:top-4">
+              <div className="sticky top-[calc(56px+env(safe-area-inset-top)+12px)] z-20 rounded-2xl border border-white/10 bg-black/95 backdrop-blur lg:top-4">
+                <div className="flex items-center gap-3 px-4 py-3">
                   <Search size={18} className="shrink-0 text-zinc-500" />
                   <input
                     type="text"
@@ -1237,8 +1237,10 @@ export default function InventoryDayPage() {
                     </button>
                   )}
                 </div>
+              </div>
 
-                <div className="shrink-0">
+              <div className="mt-3 flex justify-end">
+                <div className="w-full sm:w-auto">
                   <InventoryControlsMenu
                     sortMode={sortMode}
                     onSortChange={setSortMode}
