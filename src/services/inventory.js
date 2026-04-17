@@ -4,15 +4,11 @@ import {
   deleteDoc,
   doc,
   getDoc,
-  getDocs,
-  limit,
   onSnapshot,
-  query,
   serverTimestamp,
   setDoc,
   Timestamp,
   updateDoc,
-  where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -426,22 +422,15 @@ export function subscribeInventoryByDate(dateKey, callback) {
     return () => {};
   }
 
-  const q = query(
-    collection(db, INVENTORIES_COLLECTION),
-    where('dateKey', '==', cleanDateKey),
-    limit(1)
-  );
-
   return onSnapshot(
-    q,
+    doc(db, INVENTORIES_COLLECTION, cleanDateKey),
     (snapshot) => {
-      if (snapshot.empty) {
+      if (!snapshot.exists()) {
         callback?.(null);
         return;
       }
 
-      const docSnap = snapshot.docs[0];
-      callback?.(normalizeInventoryDoc(docSnap));
+      callback?.(normalizeInventoryDoc(snapshot));
     },
     (error) => {
       console.error('Error en subscribeInventoryByDate:', error);
@@ -462,23 +451,11 @@ export async function getInventoryByDate(dateKey) {
 
   const directSnap = await getDoc(doc(db, INVENTORIES_COLLECTION, cleanDateKey));
 
-  if (directSnap.exists()) {
-    return normalizeInventoryDoc(directSnap);
-  }
-
-  const q = query(
-    collection(db, INVENTORIES_COLLECTION),
-    where('dateKey', '==', cleanDateKey),
-    limit(1)
-  );
-
-  const snapshot = await getDocs(q);
-
-  if (snapshot.empty) {
+  if (!directSnap.exists()) {
     return null;
   }
 
-  return normalizeInventoryDoc(snapshot.docs[0]);
+  return normalizeInventoryDoc(directSnap);
 }
 
 /**
