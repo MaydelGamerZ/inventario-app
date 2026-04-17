@@ -18,6 +18,8 @@ import {
   ExternalLink,
   Copy,
   Smartphone,
+  ChevronDown,
+  ChevronUp,
   X,
   FolderOpen,
   RefreshCw,
