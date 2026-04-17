@@ -16,6 +16,7 @@ export default function AppLayout() {
     setMobileOpen(false);
   }, [location.pathname]);
 
+  // ancho sincronizado (sidebar + main)
   const sidebarWidth = useMemo(() => {
     return desktopCollapsed ? DESKTOP_COLLAPSED_WIDTH : DESKTOP_EXPANDED_WIDTH;
   }, [desktopCollapsed]);
@@ -32,13 +33,9 @@ export default function AppLayout() {
     };
   }, [sidebarWidth]);
 
-  const handleToggleDesktopSidebar = () => {
-    setDesktopCollapsed((prev) => !prev);
-  };
-
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Header mobile */}
+      {/* HEADER MOBILE */}
       <header
         className="
           sticky top-0 z-40 lg:hidden
@@ -50,25 +47,22 @@ export default function AppLayout() {
         "
       >
         <button
-          type="button"
           onClick={() => setMobileOpen(true)}
           className="
             flex h-10 w-10 items-center justify-center
             rounded-xl border border-white/10
-            bg-zinc-900 text-white
-            active:scale-[0.98]
+            bg-zinc-900
           "
-          aria-label="Abrir menú"
         >
           <Menu size={20} />
         </button>
 
-        <p className="truncate text-sm font-semibold text-white">Inventario</p>
+        <p className="text-sm font-semibold truncate">Inventario</p>
 
-        <div className="w-10 shrink-0" />
+        <div className="w-10" />
       </header>
 
-      {/* Sidebar desktop */}
+      {/* SIDEBAR DESKTOP */}
       <div className="hidden lg:block">
         <Sidebar
           collapsed={desktopCollapsed}
@@ -78,21 +72,17 @@ export default function AppLayout() {
         />
 
         <button
-          type="button"
-          onClick={handleToggleDesktopSidebar}
+          onClick={() => setDesktopCollapsed((prev) => !prev)}
           style={desktopToggleStyle}
           className="
             fixed top-4 z-[60]
-            hidden h-10 w-10 lg:flex
-            items-center justify-center
+            hidden lg:flex
+            h-10 w-10 items-center justify-center
             rounded-xl border border-white/10
             bg-zinc-900 text-zinc-300
-            transition-all duration-300 ease-out
             hover:bg-zinc-800 hover:text-white
-            active:scale-[0.98]
+            transition-all duration-300
           "
-          aria-label={desktopCollapsed ? 'Expandir menú' : 'Colapsar menú'}
-          title={desktopCollapsed ? 'Expandir menú' : 'Colapsar menú'}
         >
           {desktopCollapsed ? (
             <ChevronRight size={18} />
@@ -102,7 +92,7 @@ export default function AppLayout() {
         </button>
       </div>
 
-      {/* Sidebar mobile: OJO, solo mobile */}
+      {/* SIDEBAR MOBILE */}
       <div className="lg:hidden">
         <Sidebar
           collapsed={false}
@@ -112,16 +102,22 @@ export default function AppLayout() {
         />
       </div>
 
-      {/* Main */}
-      <main className="min-h-screen transition-all duration-300 ease-out">
-        <div style={desktopMainStyle} className="hidden lg:block" />
-
+      {/* MAIN (AQUÍ ESTABA EL ERROR) */}
+      <main
+        style={desktopMainStyle}
+        className="
+          min-h-screen
+          transition-all duration-300 ease-out
+        "
+      >
         <div
           className="
             mx-auto w-full max-w-screen-xl
+
             px-3 py-3
             sm:px-4 sm:py-4
             lg:px-6 lg:py-6
+
             pb-[max(1rem,env(safe-area-inset-bottom))]
           "
         >
