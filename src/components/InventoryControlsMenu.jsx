@@ -15,7 +15,7 @@ export default function InventoryControlsMenu({
   const rootRef = useRef(null);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open || typeof document === 'undefined') return undefined;
 
     const handlePointerDown = (event) => {
       if (!rootRef.current?.contains(event.target)) {
