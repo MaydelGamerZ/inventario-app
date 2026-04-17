@@ -7,7 +7,6 @@ import {
   getDocs,
   limit,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -357,17 +356,14 @@ export function subscribeInventoryByDate(dateKey, callback) {
  * Traemos por updatedAt desc y luego filtramos en JS cuando haga falta en la página.
  */
 export function subscribeAllInventories(callback) {
-  const q = query(
-    collection(db, INVENTORIES_COLLECTION),
-    orderBy('updatedAt', 'desc')
-  );
+  const q = query(collection(db, INVENTORIES_COLLECTION));
 
   return onSnapshot(
     q,
     (snapshot) => {
-      const list = snapshot.docs.map((docSnap) =>
-        normalizeInventoryDoc(docSnap)
-      );
+      const list = snapshot.docs
+        .map((docSnap) => normalizeInventoryDoc(docSnap))
+        .sort((a, b) => toMillis(b.updatedAt) - toMillis(a.updatedAt));
 
       callback?.(list);
     },
