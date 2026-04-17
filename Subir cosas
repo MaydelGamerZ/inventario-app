@@ -1,5 +1,5 @@
 git add .
-git commit -m "Corregido"
+git commit -m "Error visual corregido"
 git push origin main 
 
 src/layouts/AppLayout.jsx

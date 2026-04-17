@@ -20,6 +20,7 @@ import {
   subscribeInventoryByDate,
   updateInventory,
 } from '../services/inventory';
+import CustomSelect from '../components/CustomSelect';
 
 function getTodayKey() {
   const now = new Date();
@@ -245,6 +246,13 @@ function InfoCard({ icon, title, value, helper }) {
     </article>
   );
 }
+
+const PRODUCT_SORT_OPTIONS = [
+  { value: 'name', label: 'Ordenar: nombre' },
+  { value: 'category', label: 'Ordenar: categoria' },
+  { value: 'stock-desc', label: 'Ordenar: stock mayor' },
+  { value: 'stock-asc', label: 'Ordenar: stock menor' },
+];
 
 export default function ProductsPage() {
   const todayKey = useMemo(() => getTodayKey(), []);
@@ -572,6 +580,15 @@ export default function ProductsPage() {
     ];
   }, [products]);
 
+  const categoryOptions = useMemo(
+    () =>
+      categories.map((category) => ({
+        value: category,
+        label: category === 'TODAS' ? 'Todas las categorias' : category,
+      })),
+    [categories]
+  );
+
   const filteredProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
 
@@ -846,29 +863,17 @@ export default function ProductsPage() {
               </button>
             )}
           </div>
-
-          <select
+          <CustomSelect
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-blue-500"
-          >
-            {categories.map((category) => (
-              <option key={category} value={category}>
-                {category === 'TODAS' ? 'Todas las categorías' : category}
-              </option>
-            ))}
-          </select>
+            onChange={setCategoryFilter}
+            options={categoryOptions}
+          />
 
-          <select
+          <CustomSelect
             value={sortMode}
-            onChange={(e) => setSortMode(e.target.value)}
-            className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-white outline-none transition focus:border-blue-500"
-          >
-            <option value="name">Ordenar: nombre</option>
-            <option value="category">Ordenar: categoría</option>
-            <option value="stock-desc">Ordenar: stock mayor</option>
-            <option value="stock-asc">Ordenar: stock menor</option>
-          </select>
+            onChange={setSortMode}
+            options={PRODUCT_SORT_OPTIONS}
+          />
 
           <label className="inline-flex min-h-[48px] items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-zinc-200">
             <Filter className="h-4 w-4" />
@@ -1097,3 +1102,4 @@ export default function ProductsPage() {
     </div>
   );
 }
+

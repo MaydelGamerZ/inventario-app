@@ -334,6 +334,15 @@ const SORT_MODE_OPTIONS = [
   { value: 'name', label: 'Ordenar: nombre' },
 ];
 
+const OBSERVATION_OPTIONS = [
+  { value: 'Buen estado', label: 'Buen estado' },
+  { value: 'Caducado', label: 'Caducado' },
+  { value: 'Dañado', label: 'Dañado' },
+  { value: 'Maltratado', label: 'Maltratado' },
+  { value: 'Exhibición', label: 'Exhibición' },
+  { value: 'Mojado', label: 'Mojado' },
+];
+
 export default function InventoryDetailPage() {
   const { id } = useParams();
   const location = useLocation();
@@ -1158,22 +1167,25 @@ export default function InventoryDetailPage() {
                                           <label className="mb-1 block text-xs text-zinc-500">
                                             Observación
                                           </label>
-                                          <select
+                                          <CustomSelect
+
                                             value={draft.observationType}
-                                            onChange={(e) =>
+
+                                            onChange={(nextValue) =>
+
                                               updateDraft(itemKey, {
-                                                observationType: e.target.value,
+
+                                                observationType: nextValue,
+
                                               })
+
                                             }
-                                            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-white outline-none focus:border-blue-500"
-                                          >
-                                            <option>Buen estado</option>
-                                            <option>Caducado</option>
-                                            <option>Dañado</option>
-                                            <option>Maltratado</option>
-                                            <option>Exhibición</option>
-                                            <option>Mojado</option>
-                                          </select>
+
+                                            options={OBSERVATION_OPTIONS}
+
+                                            buttonClassName="min-h-[42px] rounded-xl bg-white/[0.03] px-3 py-2"
+
+                                          />
                                         </div>
 
                                         <div className="md:col-span-2 xl:col-span-2">
@@ -1295,3 +1307,5 @@ export default function InventoryDetailPage() {
     </div>
   );
 }
+
+
