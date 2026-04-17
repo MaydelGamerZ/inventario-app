@@ -18,26 +18,18 @@ export default function AppLayout() {
   }, [location.pathname]);
 
   const desktopSidebarWidth = useMemo(() => {
-    return desktopCollapsed
-      ? DESKTOP_COLLAPSED_WIDTH
-      : DESKTOP_EXPANDED_WIDTH;
+    return desktopCollapsed ? DESKTOP_COLLAPSED_WIDTH : DESKTOP_EXPANDED_WIDTH;
   }, [desktopCollapsed]);
-
-  const mainStyle = useMemo(() => {
-    return {
-      paddingLeft: 0,
-    };
-  }, []);
 
   const desktopMainStyle = useMemo(() => {
     return {
-      paddingLeft: `${desktopSidebarWidth}px`,
+      marginLeft: `${desktopSidebarWidth}px`,
     };
   }, [desktopSidebarWidth]);
 
   const desktopToggleStyle = useMemo(() => {
     return {
-      left: `${desktopSidebarWidth - 16}px`,
+      left: `${desktopSidebarWidth - 18}px`,
     };
   }, [desktopSidebarWidth]);
 
@@ -107,7 +99,7 @@ export default function AppLayout() {
       <div className="hidden lg:block">
         <Sidebar
           collapsed={desktopCollapsed}
-          mobileOpen
+          mobileOpen={false}
           onClose={() => {}}
           onNavigate={() => {}}
           onToggleCollapse={handleToggleDesktopSidebar}
@@ -124,14 +116,18 @@ export default function AppLayout() {
             bg-zinc-950/95 text-zinc-300
             shadow-[0_12px_35px_rgba(0,0,0,0.45)]
             backdrop-blur
-            transition
+            transition-all duration-300 ease-out
             hover:bg-zinc-900 hover:text-white
             active:scale-[0.98]
           "
           aria-label={desktopCollapsed ? 'Expandir menú' : 'Colapsar menú'}
           title={desktopCollapsed ? 'Expandir menú' : 'Colapsar menú'}
         >
-          {desktopCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          {desktopCollapsed ? (
+            <ChevronRight size={18} />
+          ) : (
+            <ChevronLeft size={18} />
+          )}
         </button>
       </div>
 
@@ -145,17 +141,15 @@ export default function AppLayout() {
         />
       </div>
 
-      {/* Contenido */}
+      {/* Contenido principal */}
       <main
-        style={mainStyle}
+        style={desktopMainStyle}
         className="
           min-h-[calc(100dvh-64px-env(safe-area-inset-top))]
           lg:min-h-screen
           transition-all duration-300 ease-out
         "
       >
-        <div style={desktopMainStyle} className="hidden lg:block" />
-
         <div
           className="
             mx-auto w-full max-w-screen-2xl
@@ -167,12 +161,7 @@ export default function AppLayout() {
             pr-[max(0.75rem,env(safe-area-inset-right))]
           "
         >
-          <div
-            className="
-              w-full min-w-0
-              rounded-[28px]
-            "
-          >
+          <div className="w-full min-w-0">
             <Outlet />
           </div>
         </div>

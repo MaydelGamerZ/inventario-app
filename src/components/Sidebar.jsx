@@ -1,4 +1,3 @@
-// src/components/Sidebar.jsx
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -9,8 +8,6 @@ import {
   LogOut,
   X,
   ChevronRight,
-  PanelLeftClose,
-  PanelLeftOpen,
   ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -35,7 +32,6 @@ export default function Sidebar({
   mobileOpen = false,
   onNavigate = () => {},
   onClose = () => {},
-  onToggleCollapse = () => {},
 }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -44,10 +40,6 @@ export default function Sidebar({
   const [loggingOut, setLoggingOut] = useState(false);
 
   const userName = useMemo(() => getUserName(user), [user]);
-  const isDesktop = useMemo(() => {
-    if (typeof window === 'undefined') return true;
-    return window.innerWidth >= 1024;
-  }, []);
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
@@ -92,10 +84,6 @@ export default function Sidebar({
     return location.pathname.startsWith(to);
   };
 
-  const asideWidth = collapsed
-    ? DESKTOP_COLLAPSED_WIDTH
-    : DESKTOP_EXPANDED_WIDTH;
-
   return (
     <>
       {/* Overlay móvil */}
@@ -103,87 +91,56 @@ export default function Sidebar({
         onClick={onClose}
         aria-hidden={!mobileOpen}
         className={[
-          'fixed inset-0 z-40 bg-black/72 backdrop-blur-sm transition-opacity duration-300 lg:hidden',
+          'fixed inset-0 z-40 bg-black/70 backdrop-blur-sm transition-opacity duration-300 lg:hidden',
           mobileOpen
             ? 'pointer-events-auto opacity-100'
             : 'pointer-events-none opacity-0',
         ].join(' ')}
       />
 
-      {/* Sidebar */}
+      {/* Sidebar escritorio */}
       <aside
         aria-label="Barra lateral principal"
-        style={{
-          width: isDesktop ? `${asideWidth}px` : `min(${MOBILE_WIDTH}px, 88vw)`,
-        }}
         className={[
-          'fixed inset-y-0 left-0 z-50 flex h-[100dvh] flex-col',
-          'border-r border-white/10 bg-[#050505] text-white shadow-[0_20px_60px_rgba(0,0,0,0.55)]',
+          'hidden lg:flex fixed inset-y-0 left-0 z-50 flex-col',
+          'border-r border-white/10 bg-[#050505] text-white',
+          'shadow-[0_20px_60px_rgba(0,0,0,0.55)]',
           'pt-[env(safe-area-inset-top)] pb-[max(0.75rem,env(safe-area-inset-bottom))]',
-          'pl-[max(0px,env(safe-area-inset-left))] pr-0',
-          'transition-transform duration-300 ease-out lg:transition-[width] lg:duration-300',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full',
-          'lg:translate-x-0',
+          'transition-[width] duration-300 ease-out',
         ].join(' ')}
+        style={{
+          width: collapsed
+            ? `${DESKTOP_COLLAPSED_WIDTH}px`
+            : `${DESKTOP_EXPANDED_WIDTH}px`,
+        }}
       >
-        {/* Header */}
-        <div className="border-b border-white/10 px-3 py-3 sm:px-4">
-          <div className="flex items-start justify-between gap-3">
+        <div className="border-b border-white/10 px-3 py-4">
+          <div className={collapsed ? 'text-center' : 'min-w-0'}>
             <div
-              className={collapsed ? 'w-full text-center' : 'min-w-0 flex-1'}
+              className={[
+                'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-medium',
+                'border-blue-500/25 bg-blue-500/10 text-blue-300',
+              ].join(' ')}
             >
-              <div
-                className={[
-                  'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-medium',
-                  'border-blue-500/25 bg-blue-500/10 text-blue-300',
-                ].join(' ')}
-              >
-                <ShieldCheck size={13} />
-                {collapsed ? 'INV' : 'Sistema activo'}
-              </div>
-
-              <h1
-                className={[
-                  'mt-3 font-semibold tracking-tight text-white',
-                  collapsed ? 'text-lg' : 'text-3xl leading-none',
-                ].join(' ')}
-              >
-                {collapsed ? 'INV' : 'INVENTARIO'}
-              </h1>
-
-              {!collapsed && (
-                <p className="mt-2 text-sm text-zinc-400">Panel principal</p>
-              )}
+              <ShieldCheck size={13} />
+              {collapsed ? 'INV' : 'Sistema activo'}
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onToggleCollapse}
-                className="hidden h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-zinc-300 transition hover:bg-white/[0.06] hover:text-white lg:flex"
-                aria-label={collapsed ? 'Expandir menú' : 'Colapsar menú'}
-                title={collapsed ? 'Expandir menú' : 'Colapsar menú'}
-              >
-                {collapsed ? (
-                  <PanelLeftOpen size={18} />
-                ) : (
-                  <PanelLeftClose size={18} />
-                )}
-              </button>
+            <h1
+              className={[
+                'mt-3 font-semibold tracking-tight text-white',
+                collapsed ? 'text-lg' : 'text-2xl leading-none',
+              ].join(' ')}
+            >
+              {collapsed ? 'INV' : 'INVENTARIO'}
+            </h1>
 
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-zinc-300 transition hover:bg-white/[0.06] hover:text-white lg:hidden"
-                aria-label="Cerrar menú"
-              >
-                <X size={18} />
-              </button>
-            </div>
+            {!collapsed && (
+              <p className="mt-2 text-sm text-zinc-400">Panel principal</p>
+            )}
           </div>
         </div>
 
-        {/* Navegación */}
         <nav className="flex-1 overflow-y-auto px-2 py-4 sm:px-3">
           <div className="space-y-1.5">
             {navItems.map(({ to, label, icon: Icon }) => {
@@ -231,7 +188,6 @@ export default function Sidebar({
           </div>
         </nav>
 
-        {/* Footer */}
         <div className="border-t border-white/10 p-3 sm:p-4">
           {!collapsed ? (
             <>
@@ -282,6 +238,118 @@ export default function Sidebar({
               </button>
             </div>
           )}
+        </div>
+      </aside>
+
+      {/* Sidebar móvil */}
+      <aside
+        aria-label="Barra lateral móvil"
+        className={[
+          'fixed inset-y-0 left-0 z-50 flex w-[min(312px,88vw)] flex-col lg:hidden',
+          'border-r border-white/10 bg-[#050505] text-white',
+          'shadow-[0_20px_60px_rgba(0,0,0,0.55)]',
+          'pt-[env(safe-area-inset-top)] pb-[max(0.75rem,env(safe-area-inset-bottom))]',
+          'transition-transform duration-300 ease-out',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        ].join(' ')}
+      >
+        <div className="border-b border-white/10 px-3 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div
+                className={[
+                  'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-medium',
+                  'border-blue-500/25 bg-blue-500/10 text-blue-300',
+                ].join(' ')}
+              >
+                <ShieldCheck size={13} />
+                Sistema activo
+              </div>
+
+              <h1 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+                INVENTARIO
+              </h1>
+
+              <p className="mt-2 text-sm text-zinc-400">Panel principal</p>
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-zinc-300 transition hover:bg-white/[0.06] hover:text-white"
+              aria-label="Cerrar menú"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto px-2 py-4 sm:px-3">
+          <div className="space-y-1.5">
+            {navItems.map(({ to, label, icon: Icon }) => {
+              const active = isCurrentRoute(to);
+
+              return (
+                <NavLink
+                  key={to}
+                  to={to}
+                  onClick={handleNavClick}
+                  className={() =>
+                    [
+                      'group flex min-h-[54px] items-center gap-3 rounded-2xl px-4 py-3 transition-all duration-200 active:scale-[0.99]',
+                      active
+                        ? 'bg-blue-600 text-white shadow-[0_10px_30px_rgba(37,99,235,0.28)]'
+                        : 'text-zinc-300 hover:bg-white/[0.045] hover:text-white',
+                    ].join(' ')
+                  }
+                >
+                  <Icon size={20} className="shrink-0" />
+
+                  <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                    <span className="truncate text-[15px] font-medium">
+                      {label}
+                    </span>
+
+                    <ChevronRight
+                      size={16}
+                      className={[
+                        'shrink-0 transition',
+                        active
+                          ? 'text-white'
+                          : 'text-zinc-500 group-hover:text-zinc-300',
+                      ].join(' ')}
+                    />
+                  </div>
+                </NavLink>
+              );
+            })}
+          </div>
+        </nav>
+
+        <div className="border-t border-white/10 p-3 sm:p-4">
+          <div className="mb-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              Usuario
+            </p>
+
+            <p className="mt-2 truncate text-lg font-semibold text-white">
+              {userName}
+            </p>
+
+            <p className="mt-1 break-all text-sm text-zinc-400">
+              {user?.email || 'usuario@correo.com'}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            className="flex min-h-[52px] w-full items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <LogOut size={18} />
+            {loggingOut ? 'Cerrando sesión...' : 'Cerrar sesión'}
+          </button>
         </div>
       </aside>
     </>
