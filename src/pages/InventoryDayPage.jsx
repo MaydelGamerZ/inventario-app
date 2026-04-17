@@ -31,6 +31,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { parseInventoryPdf } from '../services/pdfInventoryParser';
 import {
+  reopenInventoryDraft,
   saveDailyInventoryFromPdf,
   subscribeInventoryByDate,
   subscribeAllInventories,
@@ -414,6 +415,7 @@ export default function InventoryDayPage() {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [startingCount, setStartingCount] = useState(false);
+  const [reopeningCount, setReopeningCount] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
@@ -719,6 +721,23 @@ export default function InventoryDayPage() {
       setError(err?.message || 'No se pudo iniciar el conteo.');
     } finally {
       setStartingCount(false);
+    }
+  };
+
+  const handleReopenCount = async () => {
+    if (!todayInventory?.id) return;
+
+    try {
+      setReopeningCount(true);
+      resetMessages();
+
+      await reopenInventoryDraft(todayInventory.id);
+      navigate(`/inventario/${todayInventory.id}/editar`);
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || 'No se pudo reingresar al conteo.');
+    } finally {
+      setReopeningCount(false);
     }
   };
 
@@ -1048,6 +1067,22 @@ export default function InventoryDayPage() {
                   <Pencil size={18} />
                   Continuar conteo
                 </Link>
+              )}
+
+              {todayInventory?.status === 'GUARDADO' && (
+                <button
+                  type="button"
+                  onClick={handleReopenCount}
+                  disabled={reopeningCount}
+                  className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
+                >
+                  {reopeningCount ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Pencil size={18} />
+                  )}
+                  {reopeningCount ? 'Reabriendo...' : 'Reingresar al conteo'}
+                </button>
               )}
 
               {todayInventory?.status === 'GUARDADO' && (

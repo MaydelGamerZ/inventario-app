@@ -780,6 +780,7 @@ export async function reopenInventoryDraft(inventoryId) {
   }
 
   await updateDoc(doc(db, INVENTORIES_COLLECTION, cleanId), {
+    countingStarted: true,
     status: 'BORRADOR',
     updatedAt: serverTimestamp(),
   });

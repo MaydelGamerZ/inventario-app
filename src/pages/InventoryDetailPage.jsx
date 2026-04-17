@@ -25,6 +25,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   addInventoryCountEntry,
   finalizeInventoryCount,
+  reopenInventoryDraft,
   removeInventoryCountEntry,
   subscribeInventoryById,
 } from '../services/inventory';
@@ -44,6 +45,14 @@ function cleanText(value) {
   return String(value || '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function getTodayDateKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function formatDateLabelFromKey(dateKey) {
@@ -338,6 +347,7 @@ export default function InventoryDetailPage() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [savingFinal, setSavingFinal] = useState(false);
+  const [reopeningCount, setReopeningCount] = useState(false);
   const [actionError, setActionError] = useState('');
   const [actionSuccess, setActionSuccess] = useState('');
   const [drafts, setDrafts] = useState({});
@@ -349,6 +359,7 @@ export default function InventoryDetailPage() {
 
   const backTo =
     location.state?.from === 'history' ? '/historial' : '/inventario-diario';
+  const todayDateKey = useMemo(() => getTodayDateKey(), []);
 
   const backLabel =
     location.state?.from === 'history'
@@ -456,6 +467,11 @@ export default function InventoryDetailPage() {
   const groupedFilteredItems = useMemo(() => {
     return groupItemsByCategory(filteredItems, sortMode);
   }, [filteredItems, sortMode]);
+
+  const canReopenTodayInventory =
+    !isEditMode &&
+    inventory?.status === 'GUARDADO' &&
+    cleanText(inventory?.dateKey) === todayDateKey;
 
   useEffect(() => {
     if (!groupedFilteredItems.length) {
@@ -597,6 +613,27 @@ export default function InventoryDetailPage() {
     }
   }
 
+  async function handleReopenCount() {
+    if (!inventory?.id || !canReopenTodayInventory) return;
+
+    setActionError('');
+    setActionSuccess('');
+
+    try {
+      setReopeningCount(true);
+
+      await reopenInventoryDraft(inventory.id);
+      navigate(`/inventario/${inventory.id}/editar`, {
+        state: location.state || {},
+      });
+    } catch (err) {
+      console.error(err);
+      setActionError(err?.message || 'No se pudo reingresar al conteo.');
+    } finally {
+      setReopeningCount(false);
+    }
+  }
+
   const toggleCategory = (categoryId) => {
     setExpandedCategories((prev) => ({
       ...prev,
@@ -673,6 +710,22 @@ export default function InventoryDetailPage() {
                 <Eye size={18} />
                 Ver detalle
               </Link>
+            )}
+
+            {canReopenTodayInventory && (
+              <button
+                type="button"
+                onClick={handleReopenCount}
+                disabled={reopeningCount}
+                className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {reopeningCount ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Pencil size={18} />
+                )}
+                {reopeningCount ? 'Reabriendo...' : 'Reingresar al conteo'}
+              </button>
             )}
 
             {inventory?.status === 'GUARDADO' && (
