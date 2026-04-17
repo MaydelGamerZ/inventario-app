@@ -23,6 +23,8 @@ import {
   X,
   FolderOpen,
   Filter,
+  RefreshCw,
+  FileText,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { parseInventoryPdf } from '../services/pdfInventoryParser';
@@ -65,7 +67,9 @@ function safeNumber(value) {
 }
 
 function cleanText(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function summarizeEntries(entries = []) {
@@ -96,7 +100,9 @@ function getCountedQuantity(item) {
 }
 
 function hasAnyCount(item) {
-  return getCountEntries(item).length > 0 || safeNumber(item?.countedQuantity) > 0;
+  return (
+    getCountEntries(item).length > 0 || safeNumber(item?.countedQuantity) > 0
+  );
 }
 
 function buildItemTags(item) {
@@ -179,7 +185,7 @@ function getItemStatusClasses(status) {
 }
 
 function getInventoryStatusLabel(inventory) {
-  if (!inventory) return 'Pendiente';
+  if (!inventory) return 'Sin inventario';
   if (inventory.status === 'GUARDADO') return 'Guardado';
   if (inventory.countingStarted) return 'Conteo en proceso';
   return 'Cargado';
@@ -300,8 +306,7 @@ function groupItemsByCategory(items = [], sortMode = 'counted-first') {
   const map = new Map();
 
   for (const item of Array.isArray(items) ? items : []) {
-    const categoryName =
-      cleanText(item?.categoryName) || 'Sin categoría';
+    const categoryName = cleanText(item?.categoryName) || 'Sin categoría';
 
     if (!map.has(categoryName)) {
       map.set(categoryName, {
@@ -420,7 +425,9 @@ export default function InventoryDayPage() {
   }, [todayInventory]);
 
   const filteredItems = useMemo(() => {
-    const items = Array.isArray(todayInventory?.items) ? todayInventory.items : [];
+    const items = Array.isArray(todayInventory?.items)
+      ? todayInventory.items
+      : [];
     const term = cleanText(search).toLowerCase();
 
     const result = items.filter((item) => {
@@ -440,7 +447,7 @@ export default function InventoryDayPage() {
             entry?.observationType || '',
             entry?.comment || '',
             entry?.quantity ?? '',
-            entry?.createdByEmail || '',
+            entry?.createdByEmail || entry?.createdBy || '',
           ]
             .join(' ')
             .toLowerCase()
@@ -497,7 +504,9 @@ export default function InventoryDayPage() {
   }, [groupedFilteredItems]);
 
   const stats = useMemo(() => {
-    const items = Array.isArray(todayInventory?.items) ? todayInventory.items : [];
+    const items = Array.isArray(todayInventory?.items)
+      ? todayInventory.items
+      : [];
 
     return {
       totalProducts: items.length,
@@ -506,11 +515,11 @@ export default function InventoryDayPage() {
       alerta: items.filter((i) => i.status === 'ALERTA').length,
       faltante: items.filter((i) => i.status === 'FALTANTE').length,
       totalStockEsperado: items.reduce(
-        (sum, item) => sum + safeNumber(item.expectedQuantity),
+        (sum, item) => sum + safeNumber(item?.expectedQuantity),
         0
       ),
       totalNoDisponible: items.reduce(
-        (sum, item) => sum + safeNumber(item.unavailableQuantity),
+        (sum, item) => sum + safeNumber(item?.unavailableQuantity),
         0
       ),
       totalCountedProducts: items.filter((item) => hasAnyCount(item)).length,
@@ -686,49 +695,54 @@ export default function InventoryDayPage() {
 
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      {/* Header */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
-            <h1 className="text-3xl font-bold text-white sm:text-4xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-blue-900/60 bg-blue-950/30 px-3 py-1 text-xs font-medium text-blue-300">
+              <FileText size={14} />
+              Flujo diario
+            </div>
+
+            <h1 className="mt-4 text-3xl font-bold text-white sm:text-4xl">
               Inventario Diario
             </h1>
 
             <p className="mt-2 text-sm leading-7 text-zinc-400 sm:text-base">
-              Sube el PDF del día y el sistema agregará automáticamente fecha,
-              semana, cedis, categorías y productos. El conteo real comienza al
-              presionar <span className="font-medium text-white">Iniciar conteo</span>.
+              Aquí subes el PDF oficial del día, se crea el inventario base y
+              luego continúas con el conteo físico por producto.
             </p>
           </div>
 
-          <div className="flex w-full flex-col gap-3 sm:w-auto sm:min-w-[320px]">
-            <button
-              type="button"
-              onClick={handleUploadButtonClick}
-              disabled={uploading}
-              className={`inline-flex min-h-[52px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-500 ${
-                uploading ? 'pointer-events-none opacity-60' : ''
-              }`}
-            >
-              {uploading ? (
-                <Loader2 size={18} className="animate-spin" />
-              ) : (
-                <FileUp size={18} />
-              )}
-              {uploading ? 'Procesando PDF...' : 'Subir PDF del día'}
-            </button>
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-sm text-zinc-300">
+            <p className="text-zinc-500">Fecha activa</p>
+            <p className="mt-1 font-semibold text-white">{todayLabel}</p>
+          </div>
+        </div>
+      </section>
 
-            <button
-              type="button"
-              onClick={handleUploadButtonClick}
-              disabled={uploading}
-              className={`inline-flex min-h-[52px] items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-5 py-3 font-semibold text-white transition hover:bg-zinc-800 ${
-                uploading ? 'pointer-events-none opacity-60' : ''
-              }`}
-            >
-              <Upload size={18} />
-              Elegir archivo
-            </button>
+      {/* Subida PDF SIEMPRE visible */}
+      <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="max-w-3xl">
+            <h2 className="text-2xl font-bold text-white">
+              Importar PDF del día
+            </h2>
+            <p className="mt-2 text-sm leading-7 text-zinc-400">
+              Este bloque siempre debe verse. Desde aquí cargas o reemplazas el
+              PDF oficial del inventario diario.
+            </p>
+          </div>
 
+          {hasInventory && (
+            <div className="inline-flex items-center rounded-full border border-blue-900/60 bg-blue-950/40 px-4 py-2 text-sm font-medium text-blue-300">
+              Inventario cargado para hoy
+            </div>
+          )}
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
+          <div className="rounded-3xl border border-dashed border-zinc-700 bg-black p-5">
             <input
               ref={uploadInputRef}
               type="file"
@@ -740,12 +754,103 @@ export default function InventoryDayPage() {
               aria-label="Seleccionar PDF del inventario"
             />
 
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-600/15 text-blue-400">
+                  {uploading ? (
+                    <Loader2 size={24} className="animate-spin" />
+                  ) : (
+                    <FileUp size={24} />
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-base font-semibold text-white">
+                    {uploading
+                      ? 'Procesando PDF...'
+                      : 'Sube el archivo oficial'}
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-zinc-400">
+                    Compatible con PDF. Úsalo para crear o reemplazar el
+                    inventario base.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleUploadButtonClick}
+                  disabled={uploading}
+                  className={`inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 ${
+                    uploading ? 'pointer-events-none opacity-60' : ''
+                  }`}
+                >
+                  <Upload size={18} />
+                  {hasInventory ? 'Reemplazar PDF' : 'Subir PDF'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleUploadButtonClick}
+                  disabled={uploading}
+                  className={`inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-zinc-800 ${
+                    uploading ? 'pointer-events-none opacity-60' : ''
+                  }`}
+                >
+                  <FolderOpen size={18} />
+                  Elegir archivo
+                </button>
+              </div>
+            </div>
+
             {selectedFileName && (
-              <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-sm text-zinc-300">
-                Archivo seleccionado:{' '}
-                <span className="font-medium text-white">{selectedFileName}</span>
+              <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  Archivo seleccionado
+                </p>
+                <p className="mt-2 break-all text-sm font-medium text-white">
+                  {selectedFileName}
+                </p>
               </div>
             )}
+          </div>
+
+          <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-5">
+            <h3 className="text-base font-semibold text-white">
+              Estado del PDF
+            </h3>
+
+            <div className="mt-4 space-y-3">
+              <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-3">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">
+                  Fecha requerida
+                </p>
+                <p className="mt-1 font-semibold text-white">{todayLabel}</p>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-3">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">
+                  Inventario actual
+                </p>
+                <p className="mt-1 font-semibold text-white">
+                  {loadingToday
+                    ? 'Cargando...'
+                    : getInventoryStatusLabel(todayInventory)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-3">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">
+                  Acción recomendada
+                </p>
+                <p className="mt-1 text-sm text-zinc-300">
+                  {hasInventory
+                    ? 'Puedes reemplazar el PDF si necesitas actualizar el inventario base.'
+                    : 'Sube el PDF oficial para crear el inventario del día.'}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -787,7 +892,8 @@ export default function InventoryDayPage() {
 
               {iosUploadHelp && (
                 <p className="text-xs text-yellow-200">
-                  Consejo: en iPhone, abre el enlace en Safari normal y sube el PDF desde ahí.
+                  Consejo: en iPhone, abre el enlace en Safari normal y sube el
+                  PDF desde ahí.
                 </p>
               )}
             </div>
@@ -819,6 +925,7 @@ export default function InventoryDayPage() {
         </section>
       )}
 
+      {/* Resumen rápido */}
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
           <div className="flex items-start gap-3">
@@ -883,6 +990,7 @@ export default function InventoryDayPage() {
         </div>
       </section>
 
+      {/* Inventario activo */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -890,9 +998,8 @@ export default function InventoryDayPage() {
               Inventario activo del día
             </h2>
             <p className="mt-1 text-sm text-zinc-400">
-              Mientras siga en borrador, los conteos pueden reflejarse en tiempo
-              real entre usuarios. Solo al guardar final aparecerá en historial
-              y se podrá descargar.
+              Primero cargas el PDF. Después puedes iniciar el conteo,
+              continuarlo o descargarlo cuando ya esté guardado.
             </p>
           </div>
 
@@ -941,6 +1048,16 @@ export default function InventoryDayPage() {
                   Descargar
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={handleUploadButtonClick}
+                disabled={uploading}
+                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-3 font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
+              >
+                <RefreshCw size={18} />
+                Reemplazar PDF
+              </button>
             </div>
           )}
         </div>
@@ -1073,8 +1190,12 @@ export default function InventoryDayPage() {
                     onChange={(e) => setSortMode(e.target.value)}
                     className="min-h-[44px] rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm text-white outline-none"
                   >
-                    <option value="counted-first">Ordenar: contados primero</option>
-                    <option value="difference">Ordenar: mayor diferencia</option>
+                    <option value="counted-first">
+                      Ordenar: contados primero
+                    </option>
+                    <option value="difference">
+                      Ordenar: mayor diferencia
+                    </option>
                     <option value="name">Ordenar: nombre</option>
                   </select>
 
@@ -1147,7 +1268,8 @@ export default function InventoryDayPage() {
                           </h3>
                           <p className="mt-1 text-sm text-zinc-400">
                             {group.totalProducts} productos • Esperado:{' '}
-                            {group.totalExpected.toLocaleString('es-MX')} • Contado:{' '}
+                            {group.totalExpected.toLocaleString('es-MX')} •
+                            Contado:{' '}
                             {group.totalCounted.toLocaleString('es-MX')}
                           </p>
                         </div>
@@ -1166,7 +1288,9 @@ export default function InventoryDayPage() {
                           <div className="space-y-3">
                             {group.items.map((item, index) => {
                               const counted = getCountedQuantity(item);
-                              const expected = safeNumber(item.expectedQuantity);
+                              const expected = safeNumber(
+                                item.expectedQuantity
+                              );
                               const difference = counted - expected;
                               const tags = buildItemTags(item);
                               const countEntries = getCountEntries(item);
@@ -1179,7 +1303,8 @@ export default function InventoryDayPage() {
                                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                                     <div className="min-w-0">
                                       <p className="break-words font-semibold text-white">
-                                        {item.productName || 'Producto sin nombre'}
+                                        {item.productName ||
+                                          'Producto sin nombre'}
                                       </p>
 
                                       <p className="mt-1 text-xs text-zinc-500">
@@ -1196,7 +1321,9 @@ export default function InventoryDayPage() {
                                               )}`}
                                             >
                                               {tag.label} ·{' '}
-                                              {safeNumber(tag.quantity).toLocaleString('es-MX')}
+                                              {safeNumber(
+                                                tag.quantity
+                                              ).toLocaleString('es-MX')}
                                             </span>
                                           ))}
                                         </div>
@@ -1227,9 +1354,9 @@ export default function InventoryDayPage() {
                                         No disponible
                                       </span>
                                       <span className="text-zinc-200">
-                                        {safeNumber(item.unavailableQuantity).toLocaleString(
-                                          'es-MX'
-                                        )}
+                                        {safeNumber(
+                                          item.unavailableQuantity
+                                        ).toLocaleString('es-MX')}
                                       </span>
                                     </div>
 
@@ -1239,7 +1366,9 @@ export default function InventoryDayPage() {
                                       </span>
                                       <span
                                         className={
-                                          hasAnyCount(item) ? 'text-white font-semibold' : 'text-zinc-200'
+                                          hasAnyCount(item)
+                                            ? 'font-semibold text-white'
+                                            : 'text-zinc-200'
                                         }
                                       >
                                         {counted.toLocaleString('es-MX')}
@@ -1263,7 +1392,9 @@ export default function InventoryDayPage() {
                                       </span>
                                       <span className="text-red-300">
                                         {difference < 0
-                                          ? Math.abs(difference).toLocaleString('es-MX')
+                                          ? Math.abs(difference).toLocaleString(
+                                              'es-MX'
+                                            )
                                           : '0'}
                                       </span>
                                     </div>
@@ -1276,42 +1407,65 @@ export default function InventoryDayPage() {
                                       </p>
 
                                       <div className="mt-3 space-y-2">
-                                        {countEntries.map((entry, entryIndex) => (
-                                          <div
-                                            key={`${item.productName}-entry-${entryIndex}`}
-                                            className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2"
-                                          >
-                                            <div className="flex flex-wrap items-center gap-2">
-                                              <span
-                                                className={`inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-medium ${getTagClasses(
-                                                  entry?.observationType || 'Buen estado'
-                                                )}`}
-                                              >
-                                                {cleanText(entry?.observationType || 'Buen estado')}
-                                              </span>
+                                        {countEntries.map(
+                                          (entry, entryIndex) => (
+                                            <div
+                                              key={`${item.productName}-entry-${entryIndex}`}
+                                              className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2"
+                                            >
+                                              <div className="flex flex-wrap items-center gap-2">
+                                                <span
+                                                  className={`inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-medium ${getTagClasses(
+                                                    entry?.observationType ||
+                                                      'Buen estado'
+                                                  )}`}
+                                                >
+                                                  {cleanText(
+                                                    entry?.observationType ||
+                                                      'Buen estado'
+                                                  )}
+                                                </span>
 
-                                              <span className="text-sm font-semibold text-white">
-                                                {safeNumber(entry?.quantity).toLocaleString('es-MX')}
-                                              </span>
+                                                <span className="text-sm font-semibold text-white">
+                                                  {safeNumber(
+                                                    entry?.quantity
+                                                  ).toLocaleString('es-MX')}
+                                                </span>
+                                              </div>
+
+                                              {cleanText(entry?.comment) && (
+                                                <p className="mt-2 text-sm text-zinc-300">
+                                                  {cleanText(entry.comment)}
+                                                </p>
+                                              )}
+
+                                              {(cleanText(
+                                                entry?.createdByEmail
+                                              ) ||
+                                                cleanText(entry?.createdBy) ||
+                                                cleanText(
+                                                  entry?.createdAtLabel
+                                                ) ||
+                                                cleanText(
+                                                  entry?.createdAt
+                                                )) && (
+                                                <p className="mt-2 text-xs text-zinc-500">
+                                                  {cleanText(
+                                                    entry?.createdByEmail ||
+                                                      entry?.createdBy ||
+                                                      'Sin usuario'
+                                                  )}
+                                                  {cleanText(
+                                                    entry?.createdAtLabel ||
+                                                      entry?.createdAt
+                                                  )
+                                                    ? ` · ${cleanText(entry?.createdAtLabel || entry?.createdAt)}`
+                                                    : ''}
+                                                </p>
+                                              )}
                                             </div>
-
-                                            {cleanText(entry?.comment) && (
-                                              <p className="mt-2 text-sm text-zinc-300">
-                                                {cleanText(entry.comment)}
-                                              </p>
-                                            )}
-
-                                            {(cleanText(entry?.createdByEmail) ||
-                                              cleanText(entry?.createdAtLabel)) && (
-                                              <p className="mt-2 text-xs text-zinc-500">
-                                                {cleanText(entry?.createdByEmail || 'Sin usuario')}
-                                                {cleanText(entry?.createdAtLabel)
-                                                  ? ` · ${cleanText(entry.createdAtLabel)}`
-                                                  : ''}
-                                              </p>
-                                            )}
-                                          </div>
-                                        ))}
+                                          )
+                                        )}
                                       </div>
                                     </div>
                                   )}
@@ -1330,6 +1484,7 @@ export default function InventoryDayPage() {
         )}
       </section>
 
+      {/* Historial */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
         <div className="mb-4">
           <h2 className="text-2xl font-bold text-white">
@@ -1376,13 +1531,6 @@ export default function InventoryDayPage() {
                       className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-2 font-medium text-white transition hover:border-zinc-500"
                     >
                       Ver detalle
-                    </Link>
-
-                    <Link
-                      to={`/inventario/${inv.id}/editar`}
-                      className="inline-flex min-h-[44px] items-center justify-center rounded-2xl border border-blue-700 bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-500"
-                    >
-                      Editar
                     </Link>
 
                     <button
