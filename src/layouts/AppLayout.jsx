@@ -16,9 +16,10 @@ export default function AppLayout() {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  // ancho sincronizado (sidebar + main)
   const sidebarWidth = useMemo(() => {
-    return desktopCollapsed ? DESKTOP_COLLAPSED_WIDTH : DESKTOP_EXPANDED_WIDTH;
+    return desktopCollapsed
+      ? DESKTOP_COLLAPSED_WIDTH
+      : DESKTOP_EXPANDED_WIDTH;
   }, [desktopCollapsed]);
 
   const desktopMainStyle = useMemo(() => {
@@ -35,6 +36,7 @@ export default function AppLayout() {
 
   return (
     <div className="min-h-screen bg-black text-white">
+
       {/* HEADER MOBILE */}
       <header
         className="
@@ -57,7 +59,9 @@ export default function AppLayout() {
           <Menu size={20} />
         </button>
 
-        <p className="text-sm font-semibold truncate">Inventario</p>
+        <p className="text-sm font-semibold truncate">
+          Inventario
+        </p>
 
         <div className="w-10" />
       </header>
@@ -71,6 +75,7 @@ export default function AppLayout() {
           onNavigate={() => {}}
         />
 
+        {/* BOTÓN COLAPSO */}
         <button
           onClick={() => setDesktopCollapsed((prev) => !prev)}
           style={desktopToggleStyle}
@@ -102,12 +107,13 @@ export default function AppLayout() {
         />
       </div>
 
-      {/* MAIN (AQUÍ ESTABA EL ERROR) */}
+      {/* MAIN (RESPONSIVE CORRECTO) */}
       <main
         style={desktopMainStyle}
         className="
           min-h-screen
           transition-all duration-300 ease-out
+          lg:ml-0
         "
       >
         <div
