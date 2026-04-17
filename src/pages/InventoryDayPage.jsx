@@ -18,6 +18,11 @@ import {
   ExternalLink,
   Copy,
   Smartphone,
+  ChevronDown,
+  ChevronUp,
+  X,
+  FolderOpen,
+  Filter,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { parseInventoryPdf } from '../services/pdfInventoryParser';
@@ -59,26 +64,39 @@ function safeNumber(value) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function cleanText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
 function summarizeEntries(entries = []) {
   const summary = {};
 
   for (const entry of Array.isArray(entries) ? entries : []) {
     const label =
-      String(entry?.observationType || 'Buen estado').trim() || 'Buen estado';
+      cleanText(entry?.observationType || 'Buen estado') || 'Buen estado';
+
     summary[label] = (summary[label] || 0) + safeNumber(entry?.quantity);
   }
 
   return summary;
 }
 
+function getCountEntries(item) {
+  return Array.isArray(item?.countEntries) ? item.countEntries : [];
+}
+
 function getCountedQuantity(item) {
-  const entries = Array.isArray(item?.countEntries) ? item.countEntries : [];
+  const entries = getCountEntries(item);
 
   if (entries.length > 0) {
     return entries.reduce((sum, entry) => sum + safeNumber(entry?.quantity), 0);
   }
 
   return safeNumber(item?.countedQuantity);
+}
+
+function hasAnyCount(item) {
+  return getCountEntries(item).length > 0 || safeNumber(item?.countedQuantity) > 0;
 }
 
 function buildItemTags(item) {
@@ -97,10 +115,10 @@ function buildItemTags(item) {
     }
   });
 
-  if (counted <= 0) {
+  if (counted <= 0 && expected > 0) {
     tags.push({
       label: 'Faltante',
-      quantity: expected > 0 ? expected : 0,
+      quantity: expected,
     });
   }
 
@@ -129,6 +147,7 @@ function getTagClasses(label) {
       return 'border-orange-900/60 bg-orange-950/50 text-orange-400';
     case 'dañado':
     case 'maltratado':
+    case 'mojado':
       return 'border-zinc-700 bg-zinc-900 text-zinc-300';
     case 'exhibición':
     case 'exhibicion':
@@ -137,6 +156,23 @@ function getTagClasses(label) {
       return 'border-red-900/60 bg-red-950/50 text-red-400';
     case 'sobrante':
       return 'border-blue-900/60 bg-blue-950/50 text-blue-400';
+    default:
+      return 'border-zinc-800 bg-zinc-900 text-zinc-300';
+  }
+}
+
+function getItemStatusClasses(status) {
+  switch (String(status || '').toUpperCase()) {
+    case 'OK':
+      return 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400';
+    case 'ALERTA':
+      return 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400';
+    case 'CADUCADO':
+      return 'border-orange-900/60 bg-orange-950/50 text-orange-400';
+    case 'DAÑADO':
+      return 'border-zinc-700 bg-zinc-900 text-zinc-300';
+    case 'FALTANTE':
+      return 'border-red-900/60 bg-red-950/50 text-red-400';
     default:
       return 'border-zinc-800 bg-zinc-900 text-zinc-300';
   }
@@ -177,14 +213,16 @@ function isAppleMobileDevice() {
   const isiPhoneOrIPad =
     /iPhone|iPad|iPod/i.test(ua) || /iPhone|iPad|iPod/i.test(platform);
 
-  const isModernIPadOnMac =
-    /Mac/i.test(platform) && maxTouchPoints > 1;
+  const isModernIPadOnMac = /Mac/i.test(platform) && maxTouchPoints > 1;
 
   return isiPhoneOrIPad || isModernIPadOnMac;
 }
 
 function isIosStandalone() {
-  return isAppleMobileDevice() && (isStandaloneDisplayMode() || isLegacyNavigatorStandalone());
+  return (
+    isAppleMobileDevice() &&
+    (isStandaloneDisplayMode() || isLegacyNavigatorStandalone())
+  );
 }
 
 function isProbablyPdf(file) {
@@ -193,10 +231,7 @@ function isProbablyPdf(file) {
   const name = String(file.name || '').toLowerCase();
   const type = String(file.type || '').toLowerCase();
 
-  if (type === 'application/pdf') return true;
-  if (name.endsWith('.pdf')) return true;
-
-  return false;
+  return type === 'application/pdf' || name.endsWith('.pdf');
 }
 
 async function copyTextToClipboard(text) {
@@ -208,7 +243,7 @@ async function copyTextToClipboard(text) {
       return true;
     }
   } catch {
-    // continúa al fallback
+    // fallback
   }
 
   try {
@@ -227,6 +262,81 @@ async function copyTextToClipboard(text) {
   } catch {
     return false;
   }
+}
+
+function sortItems(items = [], sortMode = 'counted-first') {
+  const list = Array.isArray(items) ? [...items] : [];
+
+  return list.sort((a, b) => {
+    const aCounted = getCountedQuantity(a);
+    const bCounted = getCountedQuantity(b);
+    const aExpected = safeNumber(a?.expectedQuantity);
+    const bExpected = safeNumber(b?.expectedQuantity);
+    const aDiff = Math.abs(aCounted - aExpected);
+    const bDiff = Math.abs(bCounted - bExpected);
+    const aName = cleanText(a?.productName || '');
+    const bName = cleanText(b?.productName || '');
+
+    if (sortMode === 'name') {
+      return aName.localeCompare(bName, 'es', { sensitivity: 'base' });
+    }
+
+    if (sortMode === 'difference') {
+      if (bDiff !== aDiff) return bDiff - aDiff;
+      return aName.localeCompare(bName, 'es', { sensitivity: 'base' });
+    }
+
+    const aHas = hasAnyCount(a) ? 1 : 0;
+    const bHas = hasAnyCount(b) ? 1 : 0;
+
+    if (bHas !== aHas) return bHas - aHas;
+    if (bDiff !== aDiff) return bDiff - aDiff;
+
+    return aName.localeCompare(bName, 'es', { sensitivity: 'base' });
+  });
+}
+
+function groupItemsByCategory(items = [], sortMode = 'counted-first') {
+  const map = new Map();
+
+  for (const item of Array.isArray(items) ? items : []) {
+    const categoryName =
+      cleanText(item?.categoryName) || 'Sin categoría';
+
+    if (!map.has(categoryName)) {
+      map.set(categoryName, {
+        id: categoryName,
+        name: categoryName,
+        items: [],
+      });
+    }
+
+    map.get(categoryName).items.push(item);
+  }
+
+  const groups = Array.from(map.values()).map((group) => {
+    const sortedItems = sortItems(group.items, sortMode);
+    const totalExpected = sortedItems.reduce(
+      (sum, item) => sum + safeNumber(item?.expectedQuantity),
+      0
+    );
+    const totalCounted = sortedItems.reduce(
+      (sum, item) => sum + getCountedQuantity(item),
+      0
+    );
+
+    return {
+      ...group,
+      items: sortedItems,
+      totalProducts: sortedItems.length,
+      totalExpected,
+      totalCounted,
+    };
+  });
+
+  return groups.sort((a, b) =>
+    a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
+  );
 }
 
 export default function InventoryDayPage() {
@@ -254,6 +364,9 @@ export default function InventoryDayPage() {
   const [iosUploadHelp, setIosUploadHelp] = useState(false);
   const [copySuccess, setCopySuccess] = useState('');
   const [selectedFileName, setSelectedFileName] = useState('');
+  const [sortMode, setSortMode] = useState('counted-first');
+  const [showOnlyCounted, setShowOnlyCounted] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState({});
 
   const showIosStandaloneHelp = isIosStandalone();
 
@@ -267,7 +380,11 @@ export default function InventoryDayPage() {
     });
 
     const unsubscribeAll = subscribeAllInventories((list) => {
-      setAllInventories(Array.isArray(list) ? list : []);
+      const onlySaved = Array.isArray(list)
+        ? list.filter((inv) => inv?.status === 'GUARDADO')
+        : [];
+
+      setAllInventories(onlySaved);
       setLoadingHistory(false);
     });
 
@@ -303,30 +420,84 @@ export default function InventoryDayPage() {
   }, [todayInventory]);
 
   const filteredItems = useMemo(() => {
-    const items = todayInventory?.items || [];
-    const term = search.trim().toLowerCase();
+    const items = Array.isArray(todayInventory?.items) ? todayInventory.items : [];
+    const term = cleanText(search).toLowerCase();
 
-    if (!term) return items;
+    const result = items.filter((item) => {
+      const counted = getCountedQuantity(item);
+      const expected = safeNumber(item?.expectedQuantity);
+      const difference = counted - expected;
 
-    return items.filter((item) => {
       const observationLabels = Object.keys(
         summarizeEntries(item?.countEntries || [])
       )
         .join(' ')
         .toLowerCase();
 
-      return (
-        item.productName?.toLowerCase().includes(term) ||
-        item.categoryName?.toLowerCase().includes(term) ||
-        item.supplierName?.toLowerCase().includes(term) ||
-        observationLabels.includes(term) ||
-        item.status?.toLowerCase().includes(term)
-      );
+      const entriesText = getCountEntries(item)
+        .map((entry) =>
+          [
+            entry?.observationType || '',
+            entry?.comment || '',
+            entry?.quantity ?? '',
+            entry?.createdByEmail || '',
+          ]
+            .join(' ')
+            .toLowerCase()
+        )
+        .join(' ');
+
+      const searchable = [
+        item?.productName || '',
+        item?.categoryName || '',
+        item?.supplierName || '',
+        item?.status || '',
+        observationLabels,
+        entriesText,
+        String(expected),
+        String(counted),
+        String(difference),
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      if (showOnlyCounted && !hasAnyCount(item)) {
+        return false;
+      }
+
+      if (!term) return true;
+
+      return searchable.includes(term);
     });
-  }, [todayInventory, search]);
+
+    return result;
+  }, [todayInventory, search, showOnlyCounted]);
+
+  const groupedFilteredItems = useMemo(() => {
+    return groupItemsByCategory(filteredItems, sortMode);
+  }, [filteredItems, sortMode]);
+
+  useEffect(() => {
+    if (!groupedFilteredItems.length) {
+      setExpandedCategories({});
+      return;
+    }
+
+    setExpandedCategories((prev) => {
+      const next = { ...prev };
+
+      groupedFilteredItems.forEach((group) => {
+        if (typeof next[group.id] === 'undefined') {
+          next[group.id] = true;
+        }
+      });
+
+      return next;
+    });
+  }, [groupedFilteredItems]);
 
   const stats = useMemo(() => {
-    const items = todayInventory?.items || [];
+    const items = Array.isArray(todayInventory?.items) ? todayInventory.items : [];
 
     return {
       totalProducts: items.length,
@@ -340,6 +511,11 @@ export default function InventoryDayPage() {
       ),
       totalNoDisponible: items.reduce(
         (sum, item) => sum + safeNumber(item.unavailableQuantity),
+        0
+      ),
+      totalCountedProducts: items.filter((item) => hasAnyCount(item)).length,
+      totalConteoFisico: items.reduce(
+        (sum, item) => sum + getCountedQuantity(item),
         0
       ),
     };
@@ -480,6 +656,34 @@ export default function InventoryDayPage() {
     }
   };
 
+  const toggleCategory = (categoryId) => {
+    setExpandedCategories((prev) => ({
+      ...prev,
+      [categoryId]: !prev[categoryId],
+    }));
+  };
+
+  const expandAll = () => {
+    const next = {};
+    groupedFilteredItems.forEach((group) => {
+      next[group.id] = true;
+    });
+    setExpandedCategories(next);
+  };
+
+  const collapseAll = () => {
+    const next = {};
+    groupedFilteredItems.forEach((group) => {
+      next[group.id] = false;
+    });
+    setExpandedCategories(next);
+  };
+
+  const visibleProductsCount = groupedFilteredItems.reduce(
+    (sum, group) => sum + group.items.length,
+    0
+  );
+
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:p-6">
@@ -492,8 +696,7 @@ export default function InventoryDayPage() {
             <p className="mt-2 text-sm leading-7 text-zinc-400 sm:text-base">
               Sube el PDF del día y el sistema agregará automáticamente fecha,
               semana, cedis, categorías y productos. El conteo real comienza al
-              presionar{' '}
-              <span className="font-medium text-white">Iniciar conteo</span>.
+              presionar <span className="font-medium text-white">Iniciar conteo</span>.
             </p>
           </div>
 
@@ -539,7 +742,8 @@ export default function InventoryDayPage() {
 
             {selectedFileName && (
               <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-3 text-sm text-zinc-300">
-                Archivo seleccionado: <span className="font-medium text-white">{selectedFileName}</span>
+                Archivo seleccionado:{' '}
+                <span className="font-medium text-white">{selectedFileName}</span>
               </div>
             )}
           </div>
@@ -795,7 +999,7 @@ export default function InventoryDayPage() {
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
               <div className="rounded-2xl border border-emerald-900/60 bg-emerald-950/40 p-4">
                 <p className="text-sm text-emerald-400">OK</p>
                 <p className="mt-2 text-2xl font-bold text-white">{stats.ok}</p>
@@ -814,150 +1018,314 @@ export default function InventoryDayPage() {
                   {stats.faltante}
                 </p>
               </div>
+
+              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+                <p className="text-sm text-zinc-400">Productos contados</p>
+                <p className="mt-2 text-2xl font-bold text-white">
+                  {stats.totalCountedProducts}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+                <p className="text-sm text-zinc-400">Conteo físico total</p>
+                <p className="mt-2 text-2xl font-bold text-white">
+                  {stats.totalConteoFisico.toLocaleString('es-MX')}
+                </p>
+              </div>
             </div>
 
-            <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-black px-4 py-3">
-              <Search size={18} className="shrink-0 text-zinc-500" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar producto, categoría, proveedor u observación..."
-                className="w-full bg-transparent text-white outline-none placeholder:text-zinc-500"
-              />
+            <div className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 lg:flex-1">
+                  <Search size={18} className="shrink-0 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Buscar producto, categoría, proveedor, observación o cantidad..."
+                    className="w-full bg-transparent text-white outline-none placeholder:text-zinc-500"
+                  />
+                  {search && (
+                    <button
+                      type="button"
+                      onClick={() => setSearch('')}
+                      className="text-zinc-500 transition hover:text-white"
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  <label className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm text-zinc-200">
+                    <Filter size={16} />
+                    <span>Solo contados</span>
+                    <input
+                      type="checkbox"
+                      checked={showOnlyCounted}
+                      onChange={(e) => setShowOnlyCounted(e.target.checked)}
+                      className="h-4 w-4 accent-blue-600"
+                    />
+                  </label>
+
+                  <select
+                    value={sortMode}
+                    onChange={(e) => setSortMode(e.target.value)}
+                    className="min-h-[44px] rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm text-white outline-none"
+                  >
+                    <option value="counted-first">Ordenar: contados primero</option>
+                    <option value="difference">Ordenar: mayor diferencia</option>
+                    <option value="name">Ordenar: nombre</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={expandAll}
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-900"
+                  >
+                    <FolderOpen size={16} />
+                    Expandir todo
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={collapseAll}
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-900"
+                  >
+                    <FolderOpen size={16} />
+                    Contraer todo
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                  <p className="text-sm text-zinc-400">Categorías visibles</p>
+                  <p className="mt-1 text-xl font-bold text-white">
+                    {groupedFilteredItems.length}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                  <p className="text-sm text-zinc-400">Productos visibles</p>
+                  <p className="mt-1 text-xl font-bold text-white">
+                    {visibleProductsCount}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                  <p className="text-sm text-zinc-400">Búsqueda activa</p>
+                  <p className="mt-1 text-xl font-bold text-white">
+                    {search ? 'Sí' : 'No'}
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-3">
-              {filteredItems.length === 0 ? (
+            <div className="space-y-4">
+              {groupedFilteredItems.length === 0 ? (
                 <div className="rounded-2xl border border-zinc-800 bg-black px-4 py-6 text-zinc-400">
                   No hay productos que coincidan con la búsqueda.
                 </div>
               ) : (
-                filteredItems.slice(0, 80).map((item, index) => {
-                  const counted = getCountedQuantity(item);
-                  const expected = safeNumber(item.expectedQuantity);
-                  const difference = counted - expected;
-                  const tags = buildItemTags(item);
+                groupedFilteredItems.map((group) => {
+                  const isExpanded = expandedCategories[group.id] ?? true;
 
                   return (
-                    <div
-                      key={`${item.productName || 'producto'}-${index}`}
-                      className="rounded-2xl border border-zinc-800 bg-black p-4"
+                    <article
+                      key={group.id}
+                      className="overflow-hidden rounded-3xl border border-zinc-800 bg-black"
                     >
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <button
+                        type="button"
+                        onClick={() => toggleCategory(group.id)}
+                        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-zinc-950 sm:px-5"
+                      >
                         <div className="min-w-0">
-                          <p className="break-words font-semibold text-white">
-                            {item.productName || 'Producto sin nombre'}
-                          </p>
-
+                          <h3 className="break-words text-base font-bold text-blue-400 sm:text-lg">
+                            {group.name}
+                          </h3>
                           <p className="mt-1 text-sm text-zinc-400">
-                            {item.categoryName || 'Sin categoría'}
+                            {group.totalProducts} productos • Esperado:{' '}
+                            {group.totalExpected.toLocaleString('es-MX')} • Contado:{' '}
+                            {group.totalCounted.toLocaleString('es-MX')}
                           </p>
+                        </div>
 
-                          <p className="mt-1 text-xs text-zinc-500">
-                            {item.supplierName || 'Sin proveedor'}
-                          </p>
-
-                          {tags.length > 0 && (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {tags.map((tag, tagIndex) => (
-                                <span
-                                  key={`${item.productName}-${tag.label}-${tagIndex}`}
-                                  className={`inline-flex items-center rounded-xl border px-3 py-1 text-xs font-medium ${getTagClasses(
-                                    tag.label
-                                  )}`}
-                                >
-                                  {tag.label} ·{' '}
-                                  {safeNumber(tag.quantity).toLocaleString(
-                                    'es-MX'
-                                  )}
-                                </span>
-                              ))}
-                            </div>
+                        <div className="shrink-0 rounded-2xl border border-zinc-800 bg-zinc-950 p-2 text-zinc-300">
+                          {isExpanded ? (
+                            <ChevronUp size={18} />
+                          ) : (
+                            <ChevronDown size={18} />
                           )}
                         </div>
+                      </button>
 
-                        <span
-                          className={`inline-flex w-fit items-center rounded-xl border px-3 py-1 text-sm font-medium ${
-                            item.status === 'OK'
-                              ? 'border-emerald-900/60 bg-emerald-950/50 text-emerald-400'
-                              : item.status === 'ALERTA'
-                                ? 'border-yellow-900/60 bg-yellow-950/50 text-yellow-400'
-                                : item.status === 'CADUCADO'
-                                  ? 'border-orange-900/60 bg-orange-950/50 text-orange-400'
-                                  : item.status === 'DAÑADO'
-                                    ? 'border-zinc-700 bg-zinc-900 text-zinc-300'
-                                    : 'border-red-900/60 bg-red-950/50 text-red-400'
-                          }`}
-                        >
-                          {item.status || 'SIN ESTADO'}
-                        </span>
-                      </div>
+                      {isExpanded && (
+                        <div className="border-t border-zinc-800 px-4 py-4 sm:px-5">
+                          <div className="space-y-3">
+                            {group.items.map((item, index) => {
+                              const counted = getCountedQuantity(item);
+                              const expected = safeNumber(item.expectedQuantity);
+                              const difference = counted - expected;
+                              const tags = buildItemTags(item);
+                              const countEntries = getCountEntries(item);
 
-                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                          <span className="block text-xs text-zinc-500">
-                            Stock esperado
-                          </span>
-                          <span className="text-zinc-200">
-                            {expected.toLocaleString('es-MX')}
-                          </span>
+                              return (
+                                <div
+                                  key={`${group.id}-${item.productName || 'producto'}-${index}`}
+                                  className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4"
+                                >
+                                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                    <div className="min-w-0">
+                                      <p className="break-words font-semibold text-white">
+                                        {item.productName || 'Producto sin nombre'}
+                                      </p>
+
+                                      <p className="mt-1 text-xs text-zinc-500">
+                                        {item.supplierName || 'Sin proveedor'}
+                                      </p>
+
+                                      {tags.length > 0 && (
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                          {tags.map((tag, tagIndex) => (
+                                            <span
+                                              key={`${item.productName}-${tag.label}-${tagIndex}`}
+                                              className={`inline-flex items-center rounded-xl border px-3 py-1 text-xs font-medium ${getTagClasses(
+                                                tag.label
+                                              )}`}
+                                            >
+                                              {tag.label} ·{' '}
+                                              {safeNumber(tag.quantity).toLocaleString('es-MX')}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    <span
+                                      className={`inline-flex w-fit items-center rounded-xl border px-3 py-1 text-sm font-medium ${getItemStatusClasses(
+                                        item.status
+                                      )}`}
+                                    >
+                                      {item.status || 'SIN ESTADO'}
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                      <span className="block text-xs text-zinc-500">
+                                        Stock esperado
+                                      </span>
+                                      <span className="text-zinc-200">
+                                        {expected.toLocaleString('es-MX')}
+                                      </span>
+                                    </div>
+
+                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                      <span className="block text-xs text-zinc-500">
+                                        No disponible
+                                      </span>
+                                      <span className="text-zinc-200">
+                                        {safeNumber(item.unavailableQuantity).toLocaleString(
+                                          'es-MX'
+                                        )}
+                                      </span>
+                                    </div>
+
+                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                      <span className="block text-xs text-zinc-500">
+                                        Conteo físico
+                                      </span>
+                                      <span
+                                        className={
+                                          hasAnyCount(item) ? 'text-white font-semibold' : 'text-zinc-200'
+                                        }
+                                      >
+                                        {counted.toLocaleString('es-MX')}
+                                      </span>
+                                    </div>
+
+                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                      <span className="block text-xs text-zinc-500">
+                                        Sobra
+                                      </span>
+                                      <span className="text-emerald-300">
+                                        {difference > 0
+                                          ? difference.toLocaleString('es-MX')
+                                          : '0'}
+                                      </span>
+                                    </div>
+
+                                    <div className="rounded-xl border border-zinc-800 bg-black px-3 py-2">
+                                      <span className="block text-xs text-zinc-500">
+                                        Falta
+                                      </span>
+                                      <span className="text-red-300">
+                                        {difference < 0
+                                          ? Math.abs(difference).toLocaleString('es-MX')
+                                          : '0'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {countEntries.length > 0 && (
+                                    <div className="mt-4 rounded-2xl border border-zinc-800 bg-black p-3">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                        Historial de conteos
+                                      </p>
+
+                                      <div className="mt-3 space-y-2">
+                                        {countEntries.map((entry, entryIndex) => (
+                                          <div
+                                            key={`${item.productName}-entry-${entryIndex}`}
+                                            className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2"
+                                          >
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <span
+                                                className={`inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-medium ${getTagClasses(
+                                                  entry?.observationType || 'Buen estado'
+                                                )}`}
+                                              >
+                                                {cleanText(entry?.observationType || 'Buen estado')}
+                                              </span>
+
+                                              <span className="text-sm font-semibold text-white">
+                                                {safeNumber(entry?.quantity).toLocaleString('es-MX')}
+                                              </span>
+                                            </div>
+
+                                            {cleanText(entry?.comment) && (
+                                              <p className="mt-2 text-sm text-zinc-300">
+                                                {cleanText(entry.comment)}
+                                              </p>
+                                            )}
+
+                                            {(cleanText(entry?.createdByEmail) ||
+                                              cleanText(entry?.createdAtLabel)) && (
+                                              <p className="mt-2 text-xs text-zinc-500">
+                                                {cleanText(entry?.createdByEmail || 'Sin usuario')}
+                                                {cleanText(entry?.createdAtLabel)
+                                                  ? ` · ${cleanText(entry.createdAtLabel)}`
+                                                  : ''}
+                                              </p>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                          <span className="block text-xs text-zinc-500">
-                            No disponible
-                          </span>
-                          <span className="text-zinc-200">
-                            {safeNumber(
-                              item.unavailableQuantity
-                            ).toLocaleString('es-MX')}
-                          </span>
-                        </div>
-
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                          <span className="block text-xs text-zinc-500">
-                            Conteo físico
-                          </span>
-                          <span className="text-zinc-200">
-                            {counted.toLocaleString('es-MX')}
-                          </span>
-                        </div>
-
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                          <span className="block text-xs text-zinc-500">
-                            Sobra
-                          </span>
-                          <span className="text-emerald-300">
-                            {difference > 0
-                              ? difference.toLocaleString('es-MX')
-                              : '0'}
-                          </span>
-                        </div>
-
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                          <span className="block text-xs text-zinc-500">
-                            Falta
-                          </span>
-                          <span className="text-red-300">
-                            {difference < 0
-                              ? Math.abs(difference).toLocaleString('es-MX')
-                              : '0'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+                      )}
+                    </article>
                   );
                 })
               )}
             </div>
-
-            {filteredItems.length > 80 && (
-              <p className="text-sm text-zinc-500">
-                Se muestran los primeros 80 resultados. Usa la búsqueda para
-                filtrar más.
-              </p>
-            )}
           </div>
         )}
       </section>

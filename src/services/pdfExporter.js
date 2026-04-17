@@ -1,7 +1,7 @@
 // src/services/pdfExporter.js
 // Exportador PDF del inventario diario.
-// Genera un reporte agrupado por categoría con resumen general.
-// Usa jsPDF y jspdf-autotable de forma dinámica.
+// Genera un reporte agrupado por categoría con diseño más claro,
+// resumen ejecutivo, subtotales y mejor lectura para impresión.
 
 function safeString(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -12,14 +12,20 @@ function safeNumber(value) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function formatNumber(value) {
+  return safeNumber(value).toLocaleString('es-MX');
+}
+
 function normalizeObservationType(value) {
   const text = safeString(value).toLowerCase();
 
   if (text.includes('caducado')) return 'CADUCADO';
   if (text.includes('dañado') || text.includes('danado')) return 'DAÑADO';
   if (text.includes('maltratado')) return 'DAÑADO';
-  if (text.includes('exhibición') || text.includes('exhibicion'))
+  if (text.includes('mojado')) return 'DAÑADO';
+  if (text.includes('exhibición') || text.includes('exhibicion')) {
     return 'EXHIBICION';
+  }
   if (text.includes('otro')) return 'OTRO';
 
   return 'BUEN_ESTADO';
@@ -71,6 +77,185 @@ function sortCategories(a, b) {
   });
 }
 
+function getDifferenceLabel(expected, counted) {
+  const diff = safeNumber(counted) - safeNumber(expected);
+  if (diff > 0) return { value: diff, type: 'SOBRA' };
+  if (diff < 0) return { value: Math.abs(diff), type: 'FALTA' };
+  return { value: 0, type: 'OK' };
+}
+
+function buildGroupedData(items = []) {
+  const groupedItems = {};
+  const categoryTotalsMap = {};
+
+  const generalTotals = {
+    expected: 0,
+    unavailable: 0,
+    good: 0,
+    expired: 0,
+    damaged: 0,
+    exhibition: 0,
+    other: 0,
+    totalCount: 0,
+    shortage: 0,
+    surplus: 0,
+    categories: 0,
+    products: 0,
+  };
+
+  items.forEach((item) => {
+    const categoryName = safeString(item?.categoryName) || 'Sin categoría';
+    const productName = safeString(item?.productName) || 'Sin nombre';
+    const supplierName = safeString(item?.supplierName);
+
+    if (!groupedItems[categoryName]) {
+      groupedItems[categoryName] = [];
+    }
+
+    const expected = safeNumber(item?.expectedQuantity);
+    const unavailable = safeNumber(item?.unavailableQuantity);
+    const counts = buildCountSummary(item);
+    const diff = getDifferenceLabel(expected, counts.totalCount);
+
+    const row = {
+      productName,
+      supplierName,
+      expected,
+      unavailable,
+      good: counts.good,
+      expired: counts.expired,
+      damaged: counts.damaged,
+      exhibition: counts.exhibition,
+      other: counts.other,
+      totalCount: counts.totalCount,
+      shortage: diff.type === 'FALTA' ? diff.value : 0,
+      surplus: diff.type === 'SOBRA' ? diff.value : 0,
+    };
+
+    groupedItems[categoryName].push(row);
+
+    if (!categoryTotalsMap[categoryName]) {
+      categoryTotalsMap[categoryName] = {
+        categoryName,
+        itemCount: 0,
+        expected: 0,
+        unavailable: 0,
+        good: 0,
+        expired: 0,
+        damaged: 0,
+        exhibition: 0,
+        other: 0,
+        totalCount: 0,
+        shortage: 0,
+        surplus: 0,
+      };
+    }
+
+    const cat = categoryTotalsMap[categoryName];
+    cat.itemCount += 1;
+    cat.expected += expected;
+    cat.unavailable += unavailable;
+    cat.good += counts.good;
+    cat.expired += counts.expired;
+    cat.damaged += counts.damaged;
+    cat.exhibition += counts.exhibition;
+    cat.other += counts.other;
+    cat.totalCount += counts.totalCount;
+    cat.shortage += row.shortage;
+    cat.surplus += row.surplus;
+
+    generalTotals.expected += expected;
+    generalTotals.unavailable += unavailable;
+    generalTotals.good += counts.good;
+    generalTotals.expired += counts.expired;
+    generalTotals.damaged += counts.damaged;
+    generalTotals.exhibition += counts.exhibition;
+    generalTotals.other += counts.other;
+    generalTotals.totalCount += counts.totalCount;
+    generalTotals.shortage += row.shortage;
+    generalTotals.surplus += row.surplus;
+    generalTotals.products += 1;
+  });
+
+  generalTotals.categories = Object.keys(groupedItems).length;
+
+  return {
+    groupedItems,
+    categoryTotalsMap,
+    generalTotals,
+    categoryNames: Object.keys(groupedItems).sort(sortCategories),
+  };
+}
+
+function drawHeader(doc, inventory, pageWidth, marginX) {
+  const date = formatInventoryDate(inventory);
+  const cedis = safeString(inventory?.cedis) || '-';
+  const week = safeString(inventory?.week) || '-';
+
+  doc.setFillColor(20, 24, 32);
+  doc.roundedRect(marginX, 10, pageWidth - marginX * 2, 24, 4, 4, 'F');
+
+  doc.setFontSize(17);
+  doc.setTextColor(255, 255, 255);
+  doc.text('Informe de Inventario Diario', marginX + 4, 19);
+
+  doc.setFontSize(9);
+  doc.setTextColor(220, 220, 220);
+  doc.text(`Fecha: ${date}`, marginX + 4, 26);
+  doc.text(`Semana: ${week}`, marginX + 48, 26);
+  doc.text(`Cedis: ${cedis}`, marginX + 82, 26);
+}
+
+function drawSummaryCards(doc, generalTotals, marginX, startY, pageWidth) {
+  const gap = 4;
+  const cardWidth = (pageWidth - marginX * 2 - gap * 3) / 4;
+  const cards = [
+    {
+      title: 'Categorías',
+      value: formatNumber(generalTotals.categories),
+    },
+    {
+      title: 'Productos',
+      value: formatNumber(generalTotals.products),
+    },
+    {
+      title: 'Esperado',
+      value: formatNumber(generalTotals.expected),
+    },
+    {
+      title: 'Conteo total',
+      value: formatNumber(generalTotals.totalCount),
+    },
+  ];
+
+  cards.forEach((card, index) => {
+    const x = marginX + index * (cardWidth + gap);
+
+    doc.setFillColor(245, 247, 250);
+    doc.setDrawColor(220, 224, 230);
+    doc.roundedRect(x, startY, cardWidth, 18, 3, 3, 'FD');
+
+    doc.setFontSize(8);
+    doc.setTextColor(90, 98, 112);
+    doc.text(card.title, x + 3, startY + 6);
+
+    doc.setFontSize(12);
+    doc.setTextColor(28, 32, 40);
+    doc.text(card.value, x + 3, startY + 13);
+  });
+}
+
+function drawFooter(doc, totalPages, pageWidth, marginX) {
+  for (let i = 1; i <= totalPages; i += 1) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`Página ${i} de ${totalPages}`, pageWidth - marginX, 290, {
+      align: 'right',
+    });
+  }
+}
+
 /**
  * Exporta un inventario a un archivo PDF y lo descarga.
  * @param {object} inventory
@@ -101,115 +286,17 @@ export async function exportInventoryToPDF(inventory) {
   });
 
   const pageWidth = doc.internal.pageSize.getWidth();
-  const marginX = 14;
-  let currentY = 14;
+  const marginX = 10;
+  let currentY = 10;
 
-  const inventoryDate = formatInventoryDate(inventory);
+  const { groupedItems, categoryTotalsMap, generalTotals, categoryNames } =
+    buildGroupedData(items);
 
-  // Encabezado principal
-  doc.setFontSize(16);
-  doc.setTextColor(30, 30, 30);
-  doc.text('Informe de Inventario Diario', pageWidth / 2, currentY, {
-    align: 'center',
-  });
+  drawHeader(doc, inventory, pageWidth, marginX);
+  currentY = 40;
 
-  currentY += 8;
-
-  doc.setFontSize(10);
-  doc.setTextColor(70, 70, 70);
-  doc.text(`Fecha: ${inventoryDate}`, marginX, currentY);
-  currentY += 5;
-  doc.text(`Semana: ${safeString(inventory.week) || '-'}`, marginX, currentY);
-  currentY += 5;
-  doc.text(`Cedis: ${safeString(inventory.cedis) || '-'}`, marginX, currentY);
-  currentY += 5;
-  doc.text(
-    `Productos: ${items.length.toLocaleString('es-MX')}`,
-    marginX,
-    currentY
-  );
-
-  currentY += 8;
-
-  // Totales generales
-  const generalTotals = {
-    expected: 0,
-    unavailable: 0,
-    good: 0,
-    expired: 0,
-    damaged: 0,
-    exhibition: 0,
-    other: 0,
-    totalCount: 0,
-  };
-
-  // Agrupación por categoría
-  const groupedItems = {};
-  const categoriesMap = {};
-
-  items.forEach((item) => {
-    const categoryName = safeString(item?.categoryName) || 'Sin categoría';
-    const productName = safeString(item?.productName) || 'Sin nombre';
-    const supplierName = safeString(item?.supplierName);
-
-    if (!groupedItems[categoryName]) {
-      groupedItems[categoryName] = [];
-    }
-
-    const expected = safeNumber(item?.expectedQuantity);
-    const unavailable = safeNumber(item?.unavailableQuantity);
-    const counts = buildCountSummary(item);
-
-    groupedItems[categoryName].push({
-      productName,
-      supplierName,
-      expected,
-      unavailable,
-      good: counts.good,
-      expired: counts.expired,
-      damaged: counts.damaged,
-      exhibition: counts.exhibition,
-      other: counts.other,
-      totalCount: counts.totalCount,
-    });
-
-    if (!categoriesMap[categoryName]) {
-      categoriesMap[categoryName] = {
-        categoryName,
-        itemCount: 0,
-        expected: 0,
-        unavailable: 0,
-        good: 0,
-        expired: 0,
-        damaged: 0,
-        exhibition: 0,
-        other: 0,
-        totalCount: 0,
-      };
-    }
-
-    const catTotals = categoriesMap[categoryName];
-    catTotals.itemCount += 1;
-    catTotals.expected += expected;
-    catTotals.unavailable += unavailable;
-    catTotals.good += counts.good;
-    catTotals.expired += counts.expired;
-    catTotals.damaged += counts.damaged;
-    catTotals.exhibition += counts.exhibition;
-    catTotals.other += counts.other;
-    catTotals.totalCount += counts.totalCount;
-
-    generalTotals.expected += expected;
-    generalTotals.unavailable += unavailable;
-    generalTotals.good += counts.good;
-    generalTotals.expired += counts.expired;
-    generalTotals.damaged += counts.damaged;
-    generalTotals.exhibition += counts.exhibition;
-    generalTotals.other += counts.other;
-    generalTotals.totalCount += counts.totalCount;
-  });
-
-  const categoryNames = Object.keys(groupedItems).sort(sortCategories);
+  drawSummaryCards(doc, generalTotals, marginX, currentY, pageWidth);
+  currentY += 26;
 
   const head = [
     [
@@ -221,47 +308,58 @@ export async function exportInventoryToPDF(inventory) {
       'Dañado',
       'Exhibición',
       'Otro',
-      'Total',
+      'Conteo',
+      'Falta',
+      'Sobra',
     ],
   ];
 
   categoryNames.forEach((categoryName) => {
     const categoryItems = groupedItems[categoryName] || [];
-    const cat = categoriesMap[categoryName];
+    const cat = categoryTotalsMap[categoryName];
 
-    if (currentY > 245) {
+    if (currentY > 238) {
       doc.addPage();
-      currentY = 16;
+      drawHeader(doc, inventory, pageWidth, marginX);
+      currentY = 40;
     }
 
-    doc.setFontSize(12);
-    doc.setTextColor(30, 30, 30);
-    doc.text(`Categoría: ${categoryName}`, marginX, currentY);
+    doc.setFillColor(232, 240, 255);
+    doc.setDrawColor(180, 200, 235);
+    doc.roundedRect(marginX, currentY, pageWidth - marginX * 2, 10, 2, 2, 'FD');
 
-    currentY += 5;
+    doc.setFontSize(11);
+    doc.setTextColor(24, 52, 108);
+    doc.text(`Categoría: ${categoryName}`, marginX + 3, currentY + 6.5);
+
+    currentY += 12;
 
     const body = categoryItems.map((item) => [
       String(item.productName),
-      String(item.expected),
-      String(item.unavailable),
-      String(item.good),
-      String(item.expired),
-      String(item.damaged),
-      String(item.exhibition),
-      String(item.other),
-      String(item.totalCount),
+      formatNumber(item.expected),
+      formatNumber(item.unavailable),
+      formatNumber(item.good),
+      formatNumber(item.expired),
+      formatNumber(item.damaged),
+      formatNumber(item.exhibition),
+      formatNumber(item.other),
+      formatNumber(item.totalCount),
+      formatNumber(item.shortage),
+      formatNumber(item.surplus),
     ]);
 
     body.push([
       'Total categoría',
-      String(cat.expected),
-      String(cat.unavailable),
-      String(cat.good),
-      String(cat.expired),
-      String(cat.damaged),
-      String(cat.exhibition),
-      String(cat.other),
-      String(cat.totalCount),
+      formatNumber(cat.expected),
+      formatNumber(cat.unavailable),
+      formatNumber(cat.good),
+      formatNumber(cat.expired),
+      formatNumber(cat.damaged),
+      formatNumber(cat.exhibition),
+      formatNumber(cat.other),
+      formatNumber(cat.totalCount),
+      formatNumber(cat.shortage),
+      formatNumber(cat.surplus),
     ]);
 
     autoTable(doc, {
@@ -271,14 +369,15 @@ export async function exportInventoryToPDF(inventory) {
       theme: 'grid',
       margin: { left: marginX, right: marginX },
       styles: {
-        fontSize: 8,
+        fontSize: 7.5,
         cellPadding: 2,
         overflow: 'linebreak',
         textColor: [50, 50, 50],
-        lineColor: [210, 210, 210],
+        lineColor: [220, 220, 220],
+        valign: 'middle',
       },
       headStyles: {
-        fillColor: [34, 34, 34],
+        fillColor: [28, 32, 40],
         textColor: [255, 255, 255],
         fontStyle: 'bold',
       },
@@ -286,24 +385,27 @@ export async function exportInventoryToPDF(inventory) {
         fillColor: [255, 255, 255],
       },
       alternateRowStyles: {
-        fillColor: [248, 248, 248],
+        fillColor: [248, 249, 251],
       },
       columnStyles: {
-        0: { cellWidth: 48 },
-        1: { halign: 'right', cellWidth: 16 },
-        2: { halign: 'right', cellWidth: 16 },
-        3: { halign: 'right', cellWidth: 18 },
-        4: { halign: 'right', cellWidth: 16 },
-        5: { halign: 'right', cellWidth: 16 },
-        6: { halign: 'right', cellWidth: 18 },
-        7: { halign: 'right', cellWidth: 14 },
+        0: { cellWidth: 42 },
+        1: { halign: 'right', cellWidth: 14 },
+        2: { halign: 'right', cellWidth: 14 },
+        3: { halign: 'right', cellWidth: 15 },
+        4: { halign: 'right', cellWidth: 15 },
+        5: { halign: 'right', cellWidth: 15 },
+        6: { halign: 'right', cellWidth: 16 },
+        7: { halign: 'right', cellWidth: 12 },
         8: { halign: 'right', cellWidth: 14 },
+        9: { halign: 'right', cellWidth: 12 },
+        10: { halign: 'right', cellWidth: 12 },
       },
       didParseCell(data) {
         const lastRowIndex = body.length - 1;
+
         if (data.row.index === lastRowIndex) {
           data.cell.styles.fontStyle = 'bold';
-          data.cell.styles.fillColor = [235, 235, 235];
+          data.cell.styles.fillColor = [235, 238, 242];
         }
       },
     });
@@ -311,22 +413,28 @@ export async function exportInventoryToPDF(inventory) {
     currentY = (doc.lastAutoTable?.finalY || currentY) + 8;
   });
 
-  // Resumen general
-  if (currentY > 240) {
+  if (currentY > 232) {
     doc.addPage();
-    currentY = 16;
+    drawHeader(doc, inventory, pageWidth, marginX);
+    currentY = 40;
   }
 
-  doc.setFontSize(12);
-  doc.setTextColor(30, 30, 30);
-  doc.text('Resumen general', marginX, currentY);
+  doc.setFillColor(235, 245, 236);
+  doc.setDrawColor(190, 220, 192);
+  doc.roundedRect(marginX, currentY, pageWidth - marginX * 2, 10, 2, 2, 'FD');
 
-  currentY += 5;
+  doc.setFontSize(11);
+  doc.setTextColor(32, 90, 42);
+  doc.text('Resumen general', marginX + 3, currentY + 6.5);
+
+  currentY += 12;
 
   autoTable(doc, {
     startY: currentY,
     head: [
       [
+        'Categorías',
+        'Productos',
         'Esperado',
         'No disp.',
         'Buen estado',
@@ -334,50 +442,49 @@ export async function exportInventoryToPDF(inventory) {
         'Dañado',
         'Exhibición',
         'Otro',
-        'Total',
+        'Conteo',
+        'Falta',
+        'Sobra',
       ],
     ],
     body: [
       [
-        String(generalTotals.expected),
-        String(generalTotals.unavailable),
-        String(generalTotals.good),
-        String(generalTotals.expired),
-        String(generalTotals.damaged),
-        String(generalTotals.exhibition),
-        String(generalTotals.other),
-        String(generalTotals.totalCount),
+        formatNumber(generalTotals.categories),
+        formatNumber(generalTotals.products),
+        formatNumber(generalTotals.expected),
+        formatNumber(generalTotals.unavailable),
+        formatNumber(generalTotals.good),
+        formatNumber(generalTotals.expired),
+        formatNumber(generalTotals.damaged),
+        formatNumber(generalTotals.exhibition),
+        formatNumber(generalTotals.other),
+        formatNumber(generalTotals.totalCount),
+        formatNumber(generalTotals.shortage),
+        formatNumber(generalTotals.surplus),
       ],
     ],
     theme: 'grid',
     margin: { left: marginX, right: marginX },
     styles: {
-      fontSize: 9,
+      fontSize: 8,
       cellPadding: 2.5,
       halign: 'right',
-      textColor: [50, 50, 50],
+      textColor: [45, 45, 45],
+      lineColor: [220, 220, 220],
     },
     headStyles: {
-      fillColor: [34, 34, 34],
+      fillColor: [28, 32, 40],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
     },
     bodyStyles: {
-      fillColor: [248, 248, 248],
+      fillColor: [248, 249, 251],
       fontStyle: 'bold',
     },
   });
 
-  // Pie simple
   const totalPages = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= totalPages; i += 1) {
-    doc.setPage(i);
-    doc.setFontSize(8);
-    doc.setTextColor(120, 120, 120);
-    doc.text(`Página ${i} de ${totalPages}`, pageWidth - marginX, 290, {
-      align: 'right',
-    });
-  }
+  drawFooter(doc, totalPages, pageWidth, marginX);
 
   doc.save(buildFilename(inventory));
 }

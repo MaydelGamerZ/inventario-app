@@ -20,7 +20,7 @@ const categoriesRef = collection(db, 'categories');
 const productsRef = collection(db, 'products');
 
 /* =========================
-   UTILIDADES
+   UTILIDADES BÁSICAS
 ========================= */
 function safeString(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -36,18 +36,13 @@ function safeNumber(value) {
 }
 
 function safeNullableString(value) {
-  const text = safeString(value);
-  return text || '';
+  return safeString(value) || '';
 }
 
 function removeAccents(value) {
   return String(value || '')
-    .replace(/[áàäâ]/gi, 'a')
-    .replace(/[éèëê]/gi, 'e')
-    .replace(/[íìïî]/gi, 'i')
-    .replace(/[óòöô]/gi, 'o')
-    .replace(/[úùüû]/gi, 'u')
-    .replace(/ñ/gi, 'n');
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 }
 
 function normalizeObservationLabel(value) {
@@ -59,73 +54,13 @@ function normalizeObservationLabel(value) {
   if (normalized === 'danado') return 'Dañado';
   if (normalized === 'maltratado') return 'Maltratado';
   if (normalized === 'exhibicion') return 'Exhibición';
+  if (normalized === 'mojado') return 'Mojado';
 
   return raw;
 }
 
 function buildEntryId() {
   return `entry_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function sumCountEntries(entries = []) {
-  return safeArray(entries).reduce(
-    (sum, entry) => sum + safeNumber(entry.quantity),
-    0
-  );
-}
-
-function summarizeEntriesByObservation(entries = []) {
-  const summary = {};
-
-  for (const entry of safeArray(entries)) {
-    const label = normalizeObservationLabel(entry?.observationType);
-    summary[label] = (summary[label] || 0) + safeNumber(entry.quantity);
-  }
-
-  return summary;
-}
-
-function calculateDifference(expected, counted) {
-  return safeNumber(counted) - safeNumber(expected);
-}
-
-function calculateItemStatus(item) {
-  const counted = safeNumber(item.countedQuantity);
-  const expected = safeNumber(item.expectedQuantity);
-  const unavailable = safeNumber(item.unavailableQuantity);
-  const observationTotals = summarizeEntriesByObservation(item.countEntries);
-
-  if (counted <= 0) return 'FALTANTE';
-  if ((observationTotals.Caducado || 0) > 0) return 'CADUCADO';
-
-  if (
-    (observationTotals.Dañado || 0) > 0 ||
-    (observationTotals.Maltratado || 0) > 0
-  ) {
-    return 'DAÑADO';
-  }
-
-  if (unavailable > 0 || (observationTotals.Exhibición || 0) > 0) {
-    return 'ALERTA';
-  }
-
-  if (expected <= 0) return 'FALTANTE';
-
-  return 'OK';
-}
-
-function normalizeCountEntry(entry) {
-  return {
-    id: safeString(entry?.id) || buildEntryId(),
-    quantity: safeNumber(entry?.quantity),
-    comment: safeNullableString(entry?.comment),
-    observationType: normalizeObservationLabel(entry?.observationType),
-    createdAt:
-      entry?.createdAt && typeof entry.createdAt === 'string'
-        ? entry.createdAt
-        : new Date().toISOString(),
-    createdBy: safeNullableString(entry?.createdBy),
-  };
 }
 
 function buildItemIdentity(item) {
@@ -136,13 +71,83 @@ function buildItemIdentity(item) {
   ].join('::');
 }
 
+function normalizeBoolean(value) {
+  return Boolean(value);
+}
+
+/* =========================
+   ENTRIES / CONTEOS
+========================= */
+function normalizeCountEntry(entry) {
+  return {
+    id: safeString(entry?.id) || buildEntryId(),
+    quantity: Math.max(0, safeNumber(entry?.quantity)),
+    comment: safeNullableString(entry?.comment),
+    observationType: normalizeObservationLabel(entry?.observationType),
+    createdAt:
+      typeof entry?.createdAt === 'string' && entry.createdAt
+        ? entry.createdAt
+        : new Date().toISOString(),
+    createdBy: safeNullableString(entry?.createdBy || entry?.createdByEmail),
+  };
+}
+
+function sumCountEntries(entries = []) {
+  return safeArray(entries).reduce(
+    (sum, entry) => sum + safeNumber(entry?.quantity),
+    0
+  );
+}
+
+function summarizeEntriesByObservation(entries = []) {
+  const summary = {};
+
+  for (const entry of safeArray(entries)) {
+    const label = normalizeObservationLabel(entry?.observationType);
+    summary[label] = (summary[label] || 0) + safeNumber(entry?.quantity);
+  }
+
+  return summary;
+}
+
+/* =========================
+   ITEMS / INVENTARIO
+========================= */
+function calculateDifference(expected, counted) {
+  return safeNumber(counted) - safeNumber(expected);
+}
+
+function calculateItemStatus(item) {
+  const counted = safeNumber(item?.countedQuantity);
+  const expected = safeNumber(item?.expectedQuantity);
+  const unavailable = safeNumber(item?.unavailableQuantity);
+  const observationTotals = summarizeEntriesByObservation(item?.countEntries);
+
+  if (expected <= 0 && counted <= 0) return 'FALTANTE';
+  if (counted <= 0) return 'FALTANTE';
+  if ((observationTotals.Caducado || 0) > 0) return 'CADUCADO';
+
+  if (
+    (observationTotals.Dañado || 0) > 0 ||
+    (observationTotals.Maltratado || 0) > 0 ||
+    (observationTotals.Mojado || 0) > 0
+  ) {
+    return 'DAÑADO';
+  }
+
+  if (unavailable > 0 || (observationTotals.Exhibición || 0) > 0) {
+    return 'ALERTA';
+  }
+
+  return 'OK';
+}
+
 function normalizeInventoryItem(item) {
   const countEntries = safeArray(item?.countEntries).map(normalizeCountEntry);
   const countedQuantity = sumCountEntries(countEntries);
-  const difference = calculateDifference(
-    item?.expectedQuantity,
-    countedQuantity
-  );
+  const expectedQuantity = Math.max(0, safeNumber(item?.expectedQuantity));
+  const unavailableQuantity = Math.max(0, safeNumber(item?.unavailableQuantity));
+  const difference = calculateDifference(expectedQuantity, countedQuantity);
 
   const normalized = {
     itemKey: safeString(item?.itemKey) || buildItemIdentity(item),
@@ -152,8 +157,8 @@ function normalizeInventoryItem(item) {
     categoryRaw: safeString(item?.categoryRaw),
     supplierName: safeString(item?.supplierName),
     supplierCode: safeString(item?.supplierCode),
-    expectedQuantity: safeNumber(item?.expectedQuantity),
-    unavailableQuantity: safeNumber(item?.unavailableQuantity),
+    expectedQuantity,
+    unavailableQuantity,
     countedQuantity,
     total: countedQuantity,
     difference,
@@ -163,7 +168,9 @@ function normalizeInventoryItem(item) {
   };
 
   normalized.status =
-    calculateItemStatus(normalized) || safeString(item?.status) || 'OK';
+    safeString(item?.status) || calculateItemStatus(normalized) || 'OK';
+
+  normalized.status = calculateItemStatus(normalized);
 
   return normalized;
 }
@@ -173,11 +180,11 @@ function buildTotals(items = [], categories = []) {
 
   return {
     totalGeneral: normalizedItems.reduce(
-      (sum, item) => sum + safeNumber(item.expectedQuantity),
+      (sum, item) => sum + safeNumber(item?.expectedQuantity),
       0
     ),
     totalGeneralNoDisponible: normalizedItems.reduce(
-      (sum, item) => sum + safeNumber(item.unavailableQuantity),
+      (sum, item) => sum + safeNumber(item?.unavailableQuantity),
       0
     ),
     productCount: normalizedItems.length,
@@ -186,36 +193,35 @@ function buildTotals(items = [], categories = []) {
 }
 
 function normalizeInventoryPayload(data = {}, options = {}) {
-  const items = safeArray(data.items).map(normalizeInventoryItem);
-  const categories = safeArray(data.categories);
+  const items = safeArray(data?.items).map(normalizeInventoryItem);
+  const categories = safeArray(data?.categories);
   const totals = buildTotals(items, categories);
 
   const payload = {
-    date: safeString(data.date),
-    dateKey: safeString(data.dateKey),
-    week: safeString(data.week),
-    cedis: safeString(data.cedis),
-    status: safeString(data.status) || 'BORRADOR',
-    sourceType: safeString(data.sourceType) || 'manual',
-    sourceFileName: safeString(data.sourceFileName),
-    importedByEmail: safeString(data.importedByEmail),
-    notes: safeNullableString(data.notes),
+    date: safeString(data?.date),
+    dateKey: safeString(data?.dateKey),
+    week: safeString(data?.week),
+    cedis: safeString(data?.cedis),
+    status: safeString(data?.status) || 'BORRADOR',
+    sourceType: safeString(data?.sourceType) || 'manual',
+    sourceFileName: safeString(data?.sourceFileName),
+    importedByEmail: safeString(data?.importedByEmail),
+    notes: safeNullableString(data?.notes),
     categories,
     items,
     totals,
-    countingStarted: Boolean(data.countingStarted),
-    countingFinished: Boolean(data.countingFinished),
-    finalizedAt: data.finalizedAt || null,
-    finalizedByEmail: safeNullableString(data.finalizedByEmail),
-    lastCountUpdatedAt: data.lastCountUpdatedAt || null,
+    countingStarted: normalizeBoolean(data?.countingStarted),
+    countingFinished: normalizeBoolean(data?.countingFinished),
+    finalizedAt: data?.finalizedAt || null,
+    finalizedByEmail: safeNullableString(data?.finalizedByEmail),
+    lastCountUpdatedAt: data?.lastCountUpdatedAt || null,
   };
 
-  if (options.includeTimestamps) {
+  if (options.includeCreatedAt) {
     payload.createdAt = serverTimestamp();
-    payload.updatedAt = serverTimestamp();
-  } else {
-    payload.updatedAt = serverTimestamp();
   }
+
+  payload.updatedAt = serverTimestamp();
 
   if (options.includeImportedAt) {
     payload.importedAt = serverTimestamp();
@@ -228,14 +234,62 @@ function isFinalStatus(status) {
   return safeString(status).toUpperCase() === 'GUARDADO';
 }
 
-function findItemOrThrow(items, itemIndex) {
+function assertInventoryId(inventoryId) {
+  const normalizedId = safeString(inventoryId);
+
+  if (!normalizedId) {
+    throw new Error('No se recibió el id del inventario.');
+  }
+
+  return normalizedId;
+}
+
+function assertEntryId(entryId) {
+  const normalizedEntryId = safeString(entryId);
+
+  if (!normalizedEntryId) {
+    throw new Error('No se recibió el id del conteo.');
+  }
+
+  return normalizedEntryId;
+}
+
+function findItemListOrThrow(items, itemIndex) {
   const list = safeArray(items);
 
-  if (itemIndex < 0 || itemIndex >= list.length) {
+  if (
+    typeof itemIndex !== 'number' ||
+    itemIndex < 0 ||
+    itemIndex >= list.length
+  ) {
     throw new Error('Producto no válido para conteo.');
   }
 
   return list;
+}
+
+async function getInventoryDocOrThrow(inventoryId) {
+  const inventory = await getInventoryById(inventoryId);
+
+  if (!inventory) {
+    throw new Error('Inventario no encontrado.');
+  }
+
+  return inventory;
+}
+
+function rebuildItemsWithUpdatedEntry(items, itemIndex, updater) {
+  const list = findItemListOrThrow(items, itemIndex);
+
+  return list.map((item, index) => {
+    const normalizedItem = normalizeInventoryItem(item);
+
+    if (index !== itemIndex) {
+      return normalizedItem;
+    }
+
+    return normalizeInventoryItem(updater(normalizedItem));
+  });
 }
 
 /* =========================
@@ -252,7 +306,7 @@ export async function getAllInventories(options = {}) {
     ...item.data(),
   }));
 
-  return includeDrafts ? list : list.filter((inv) => isFinalStatus(inv.status));
+  return includeDrafts ? list : list.filter((inv) => isFinalStatus(inv?.status));
 }
 
 export async function getInventoryById(inventoryId) {
@@ -274,10 +328,7 @@ export async function getInventoryById(inventoryId) {
 
 export async function getInventoryByDate(dateKey) {
   const normalizedDateKey = safeString(dateKey);
-
-  if (!normalizedDateKey) {
-    return null;
-  }
+  if (!normalizedDateKey) return null;
 
   const q = query(
     inventoriesRef,
@@ -301,8 +352,8 @@ export async function getInventoryByDate(dateKey) {
 
 export async function createInventory(data) {
   const payload = normalizeInventoryPayload(data, {
-    includeTimestamps: true,
-    includeImportedAt: safeString(data.sourceType) === 'pdf',
+    includeCreatedAt: true,
+    includeImportedAt: safeString(data?.sourceType) === 'pdf',
   });
 
   const docRef = await addDoc(inventoriesRef, payload);
@@ -310,12 +361,7 @@ export async function createInventory(data) {
 }
 
 export async function updateInventory(inventoryId, data) {
-  const normalizedId = safeString(inventoryId);
-
-  if (!normalizedId) {
-    throw new Error('No se recibió el id del inventario.');
-  }
-
+  const normalizedId = assertInventoryId(inventoryId);
   const ref = doc(db, 'inventories', normalizedId);
   const payload = normalizeInventoryPayload(data);
 
@@ -357,8 +403,8 @@ export async function saveDailyInventoryFromPdf(
 
     return normalizeInventoryItem({
       ...normalizedIncoming,
-      countEntries: safeArray(existingItem.countEntries),
-      observation: existingItem.observation || '',
+      countEntries: safeArray(existingItem?.countEntries),
+      observation: existingItem?.observation || '',
     });
   });
 
@@ -390,16 +436,8 @@ export async function saveDailyInventoryFromPdf(
   return await getInventoryById(newInventoryId);
 }
 
-/**
- * Inicia formalmente el conteo.
- * Mantiene el inventario en BORRADOR.
- */
 export async function startInventoryCount(inventoryId) {
-  const currentInventory = await getInventoryById(inventoryId);
-
-  if (!currentInventory) {
-    throw new Error('Inventario no encontrado.');
-  }
+  const currentInventory = await getInventoryDocOrThrow(inventoryId);
 
   await updateInventory(inventoryId, {
     ...currentInventory,
@@ -414,43 +452,32 @@ export async function startInventoryCount(inventoryId) {
   return await getInventoryById(inventoryId);
 }
 
-/**
- * Agrega un conteo en tiempo real.
- */
 export async function addInventoryCountEntry(
   inventoryId,
   itemIndex,
   entry,
   actorEmail = ''
 ) {
-  const currentInventory = await getInventoryById(inventoryId);
+  const currentInventory = await getInventoryDocOrThrow(inventoryId);
 
-  if (!currentInventory) {
-    throw new Error('Inventario no encontrado.');
-  }
+  const updatedItems = rebuildItemsWithUpdatedEntry(
+    currentInventory?.items,
+    itemIndex,
+    (normalizedItem) => {
+      const nextEntries = [
+        ...safeArray(normalizedItem?.countEntries),
+        normalizeCountEntry({
+          ...entry,
+          createdBy: safeString(actorEmail),
+        }),
+      ];
 
-  const items = findItemOrThrow(currentInventory.items, itemIndex);
-
-  const updatedItems = items.map((item, index) => {
-    if (index !== itemIndex) {
-      return normalizeInventoryItem(item);
+      return {
+        ...normalizedItem,
+        countEntries: nextEntries,
+      };
     }
-
-    const normalizedItem = normalizeInventoryItem(item);
-
-    const nextEntries = [
-      ...safeArray(normalizedItem.countEntries),
-      normalizeCountEntry({
-        ...entry,
-        createdBy: safeString(actorEmail),
-      }),
-    ];
-
-    return normalizeInventoryItem({
-      ...normalizedItem,
-      countEntries: nextEntries,
-    });
-  });
+  );
 
   await updateInventory(inventoryId, {
     ...currentInventory,
@@ -464,9 +491,6 @@ export async function addInventoryCountEntry(
   return await getInventoryById(inventoryId);
 }
 
-/**
- * Edita un conteo ya existente.
- */
 export async function updateInventoryCountEntry(
   inventoryId,
   itemIndex,
@@ -474,43 +498,31 @@ export async function updateInventoryCountEntry(
   updates = {},
   actorEmail = ''
 ) {
-  const currentInventory = await getInventoryById(inventoryId);
+  const currentInventory = await getInventoryDocOrThrow(inventoryId);
+  const normalizedEntryId = assertEntryId(entryId);
 
-  if (!currentInventory) {
-    throw new Error('Inventario no encontrado.');
-  }
+  const updatedItems = rebuildItemsWithUpdatedEntry(
+    currentInventory?.items,
+    itemIndex,
+    (normalizedItem) => {
+      const nextEntries = safeArray(normalizedItem?.countEntries).map((entry) => {
+        if (safeString(entry?.id) !== normalizedEntryId) {
+          return entry;
+        }
 
-  const items = findItemOrThrow(currentInventory.items, itemIndex);
-  const normalizedEntryId = safeString(entryId);
-
-  if (!normalizedEntryId) {
-    throw new Error('No se recibió el id del conteo.');
-  }
-
-  const updatedItems = items.map((item, index) => {
-    if (index !== itemIndex) {
-      return normalizeInventoryItem(item);
-    }
-
-    const normalizedItem = normalizeInventoryItem(item);
-
-    const nextEntries = safeArray(normalizedItem.countEntries).map((entry) => {
-      if (safeString(entry.id) !== normalizedEntryId) {
-        return entry;
-      }
-
-      return normalizeCountEntry({
-        ...entry,
-        ...updates,
-        createdBy: safeString(actorEmail) || safeString(entry.createdBy),
+        return normalizeCountEntry({
+          ...entry,
+          ...updates,
+          createdBy: safeString(actorEmail) || safeString(entry?.createdBy),
+        });
       });
-    });
 
-    return normalizeInventoryItem({
-      ...normalizedItem,
-      countEntries: nextEntries,
-    });
-  });
+      return {
+        ...normalizedItem,
+        countEntries: nextEntries,
+      };
+    }
+  );
 
   await updateInventory(inventoryId, {
     ...currentInventory,
@@ -524,43 +536,28 @@ export async function updateInventoryCountEntry(
   return await getInventoryById(inventoryId);
 }
 
-/**
- * Elimina un conteo en tiempo real.
- */
 export async function removeInventoryCountEntry(
   inventoryId,
   itemIndex,
   entryId
 ) {
-  const currentInventory = await getInventoryById(inventoryId);
+  const currentInventory = await getInventoryDocOrThrow(inventoryId);
+  const normalizedEntryId = assertEntryId(entryId);
 
-  if (!currentInventory) {
-    throw new Error('Inventario no encontrado.');
-  }
+  const updatedItems = rebuildItemsWithUpdatedEntry(
+    currentInventory?.items,
+    itemIndex,
+    (normalizedItem) => {
+      const nextEntries = safeArray(normalizedItem?.countEntries).filter(
+        (entry) => safeString(entry?.id) !== normalizedEntryId
+      );
 
-  const items = findItemOrThrow(currentInventory.items, itemIndex);
-  const normalizedEntryId = safeString(entryId);
-
-  if (!normalizedEntryId) {
-    throw new Error('No se recibió el id del conteo.');
-  }
-
-  const updatedItems = items.map((item, index) => {
-    if (index !== itemIndex) {
-      return normalizeInventoryItem(item);
+      return {
+        ...normalizedItem,
+        countEntries: nextEntries,
+      };
     }
-
-    const normalizedItem = normalizeInventoryItem(item);
-
-    const nextEntries = safeArray(normalizedItem.countEntries).filter(
-      (entry) => safeString(entry.id) !== normalizedEntryId
-    );
-
-    return normalizeInventoryItem({
-      ...normalizedItem,
-      countEntries: nextEntries,
-    });
-  });
+  );
 
   await updateInventory(inventoryId, {
     ...currentInventory,
@@ -574,42 +571,31 @@ export async function removeInventoryCountEntry(
   return await getInventoryById(inventoryId);
 }
 
-/**
- * Reemplaza todos los conteos de un producto.
- */
 export async function replaceInventoryItemEntries(
   inventoryId,
   itemIndex,
   entries = [],
   actorEmail = ''
 ) {
-  const currentInventory = await getInventoryById(inventoryId);
+  const currentInventory = await getInventoryDocOrThrow(inventoryId);
 
-  if (!currentInventory) {
-    throw new Error('Inventario no encontrado.');
-  }
+  const updatedItems = rebuildItemsWithUpdatedEntry(
+    currentInventory?.items,
+    itemIndex,
+    (normalizedItem) => {
+      const nextEntries = safeArray(entries).map((entry) =>
+        normalizeCountEntry({
+          ...entry,
+          createdBy: safeString(entry?.createdBy) || safeString(actorEmail),
+        })
+      );
 
-  const items = findItemOrThrow(currentInventory.items, itemIndex);
-
-  const updatedItems = items.map((item, index) => {
-    if (index !== itemIndex) {
-      return normalizeInventoryItem(item);
+      return {
+        ...normalizedItem,
+        countEntries: nextEntries,
+      };
     }
-
-    const normalizedItem = normalizeInventoryItem(item);
-
-    const nextEntries = safeArray(entries).map((entry) =>
-      normalizeCountEntry({
-        ...entry,
-        createdBy: safeString(entry?.createdBy) || safeString(actorEmail),
-      })
-    );
-
-    return normalizeInventoryItem({
-      ...normalizedItem,
-      countEntries: nextEntries,
-    });
-  });
+  );
 
   await updateInventory(inventoryId, {
     ...currentInventory,
@@ -623,17 +609,12 @@ export async function replaceInventoryItemEntries(
   return await getInventoryById(inventoryId);
 }
 
-/**
- * Guarda notas o estructura en BORRADOR.
- * No lo manda al historial.
- */
-export async function saveInventoryDetailDraft(inventoryId, items, notes = '') {
-  const currentInventory = await getInventoryById(inventoryId);
-
-  if (!currentInventory) {
-    throw new Error('Inventario no encontrado.');
-  }
-
+export async function saveInventoryDetailDraft(
+  inventoryId,
+  items,
+  notes = ''
+) {
+  const currentInventory = await getInventoryDocOrThrow(inventoryId);
   const normalizedItems = safeArray(items).map(normalizeInventoryItem);
 
   await updateInventory(inventoryId, {
@@ -649,22 +630,13 @@ export async function saveInventoryDetailDraft(inventoryId, items, notes = '') {
   return await getInventoryById(inventoryId);
 }
 
-/**
- * Guardado FINAL.
- * Aquí recién pasa a historial.
- */
 export async function finalizeInventoryCount(
   inventoryId,
   items,
   notes = '',
   actorEmail = ''
 ) {
-  const currentInventory = await getInventoryById(inventoryId);
-
-  if (!currentInventory) {
-    throw new Error('Inventario no encontrado.');
-  }
-
+  const currentInventory = await getInventoryDocOrThrow(inventoryId);
   const normalizedItems = safeArray(items).map(normalizeInventoryItem);
 
   await updateInventory(inventoryId, {
@@ -687,7 +659,7 @@ export async function finalizeInventoryCount(
 ========================= */
 
 export function subscribeAllInventories(callback, options = {}) {
-  const includeDrafts = Boolean(options.includeDrafts);
+  const includeDrafts = Boolean(options?.includeDrafts);
   const q = query(inventoriesRef, orderBy('dateKey', 'desc'));
 
   return onSnapshot(
@@ -699,7 +671,7 @@ export function subscribeAllInventories(callback, options = {}) {
       }));
 
       if (!includeDrafts) {
-        inventories = inventories.filter((inv) => isFinalStatus(inv.status));
+        inventories = inventories.filter((inv) => isFinalStatus(inv?.status));
       }
 
       callback(inventories);
@@ -792,7 +764,7 @@ export async function getCategories() {
 }
 
 export async function createCategory(data) {
-  const name = safeString(data.name);
+  const name = safeString(data?.name);
 
   if (!name) {
     throw new Error('La categoría necesita nombre.');
@@ -800,7 +772,7 @@ export async function createCategory(data) {
 
   const payload = {
     name,
-    description: safeString(data.description),
+    description: safeString(data?.description),
     createdAt: serverTimestamp(),
   };
 
@@ -833,7 +805,7 @@ export async function getProducts() {
 }
 
 export async function createProduct(data) {
-  const name = safeString(data.name);
+  const name = safeString(data?.name);
 
   if (!name) {
     throw new Error('El producto necesita nombre.');
@@ -841,11 +813,11 @@ export async function createProduct(data) {
 
   const payload = {
     name,
-    categoryId: safeString(data.categoryId),
-    categoryName: safeString(data.categoryName),
-    presentation: safeString(data.presentation),
-    weight: safeString(data.weight),
-    sku: safeString(data.sku),
+    categoryId: safeString(data?.categoryId),
+    categoryName: safeString(data?.categoryName),
+    presentation: safeString(data?.presentation),
+    weight: safeString(data?.weight),
+    sku: safeString(data?.sku),
     createdAt: serverTimestamp(),
   };
 

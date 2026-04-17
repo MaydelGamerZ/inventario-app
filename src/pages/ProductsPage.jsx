@@ -10,6 +10,10 @@ import {
   Trash2,
   Loader2,
   Boxes,
+  ChevronDown,
+  ChevronUp,
+  X,
+  Filter,
 } from 'lucide-react';
 import { getInventoryByDate, updateInventory } from '../services/inventory';
 
@@ -22,7 +26,9 @@ function getTodayKey() {
 }
 
 function normalizeText(value) {
-  return String(value || '').trim();
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function normalizeStock(value) {
@@ -42,6 +48,48 @@ function makeLocalId(prefix = 'row') {
   }
 
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getItemStatus(expectedQuantity, unavailableQuantity) {
+  const stock = normalizeStock(expectedQuantity);
+  const unavailable = normalizeStock(unavailableQuantity);
+
+  if (stock <= 0) return 'FALTANTE';
+  if (unavailable > 0) return 'ALERTA';
+  return 'OK';
+}
+
+function sortProducts(list = [], sortMode = 'name') {
+  const items = Array.isArray(list) ? [...list] : [];
+
+  return items.sort((a, b) => {
+    const aName = normalizeText(a.name).toLowerCase();
+    const bName = normalizeText(b.name).toLowerCase();
+    const aCategory = normalizeText(a.category).toLowerCase();
+    const bCategory = normalizeText(b.category).toLowerCase();
+    const aStock = normalizeStock(a.stock);
+    const bStock = normalizeStock(b.stock);
+
+    if (sortMode === 'stock-desc') {
+      if (bStock !== aStock) return bStock - aStock;
+      return aName.localeCompare(bName, 'es', { sensitivity: 'base' });
+    }
+
+    if (sortMode === 'stock-asc') {
+      if (aStock !== bStock) return aStock - bStock;
+      return aName.localeCompare(bName, 'es', { sensitivity: 'base' });
+    }
+
+    if (sortMode === 'category') {
+      const categoryCompare = aCategory.localeCompare(bCategory, 'es', {
+        sensitivity: 'base',
+      });
+      if (categoryCompare !== 0) return categoryCompare;
+      return aName.localeCompare(bName, 'es', { sensitivity: 'base' });
+    }
+
+    return aName.localeCompare(bName, 'es', { sensitivity: 'base' });
+  });
 }
 
 function InfoCard({ icon, title, value, helper }) {
@@ -79,6 +127,9 @@ export default function ProductsPage() {
 
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('TODAS');
+  const [sortMode, setSortMode] = useState('name');
+  const [showOnlyDirty, setShowOnlyDirty] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState({});
 
   const [newProduct, setNewProduct] = useState({
     name: '',
@@ -115,6 +166,10 @@ export default function ProductsPage() {
             name: item.productName || '',
             category: item.categoryName || '',
             stock: item.expectedQuantity ?? 0,
+            unavailableQuantity: item.unavailableQuantity ?? 0,
+            status:
+              item.status ||
+              getItemStatus(item.expectedQuantity, item.unavailableQuantity),
             isDirty: false,
           }))
         : [];
@@ -137,15 +192,21 @@ export default function ProductsPage() {
     clearMessages();
 
     setProducts((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              [field]: value,
-              isDirty: true,
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.id !== id) return item;
+
+        const updated = {
+          ...item,
+          [field]: value,
+          isDirty: true,
+        };
+
+        if (field === 'stock') {
+          updated.status = getItemStatus(value, item.unavailableQuantity);
+        }
+
+        return updated;
+      })
     );
   }
 
@@ -169,12 +230,7 @@ export default function ProductsPage() {
         productName: cleanName,
         categoryName: cleanCategory,
         expectedQuantity: cleanStock,
-        status:
-          cleanStock <= 0
-            ? 'FALTANTE'
-            : Number(original.unavailableQuantity || 0) > 0
-              ? 'ALERTA'
-              : 'OK',
+        status: getItemStatus(cleanStock, original.unavailableQuantity),
       };
     } else {
       updatedItems.push({
@@ -190,7 +246,7 @@ export default function ProductsPage() {
         total: '',
         difference: '',
         observation: '',
-        status: cleanStock <= 0 ? 'FALTANTE' : 'OK',
+        status: getItemStatus(cleanStock, 0),
       });
     }
 
@@ -235,6 +291,7 @@ export default function ProductsPage() {
       await updateInventory(inventoryId, updatedInv);
 
       setInventoryData(updatedInv);
+
       setProducts((prev) =>
         prev.map((item) =>
           item.id === product.id
@@ -243,6 +300,7 @@ export default function ProductsPage() {
                 name: cleanName,
                 category: cleanCategory,
                 stock: cleanStock,
+                status: getItemStatus(cleanStock, item.unavailableQuantity),
                 isDirty: false,
                 itemIndex:
                   product.itemIndex !== undefined && product.itemIndex !== null
@@ -302,7 +360,7 @@ export default function ProductsPage() {
         total: '',
         difference: '',
         observation: '',
-        status: cleanStock <= 0 ? 'FALTANTE' : 'OK',
+        status: getItemStatus(cleanStock, 0),
       };
 
       const updatedItems = [...(inventoryData.items || []), newItem];
@@ -315,17 +373,18 @@ export default function ProductsPage() {
 
       setInventoryData(updatedInv);
 
-      setProducts((prev) => [
-        {
-          id: makeLocalId('product'),
-          itemIndex: updatedItems.length - 1,
-          name: cleanName,
-          category: cleanCategory,
-          stock: cleanStock,
-          isDirty: false,
-        },
-        ...prev,
-      ]);
+      const addedLocalProduct = {
+        id: makeLocalId('product'),
+        itemIndex: updatedItems.length - 1,
+        name: cleanName,
+        category: cleanCategory,
+        stock: cleanStock,
+        unavailableQuantity: 0,
+        status: getItemStatus(cleanStock, 0),
+        isDirty: false,
+      };
+
+      setProducts((prev) => [addedLocalProduct, ...prev]);
 
       setNewProduct({
         name: '',
@@ -401,7 +460,10 @@ export default function ProductsPage() {
       products.map((item) => normalizeText(item.category)).filter(Boolean)
     );
 
-    return ['TODAS', ...Array.from(unique).sort((a, b) => a.localeCompare(b))];
+    return [
+      'TODAS',
+      ...Array.from(unique).sort((a, b) => a.localeCompare(b, 'es')),
+    ];
   }, [products]);
 
   const filteredProducts = useMemo(() => {
@@ -409,15 +471,58 @@ export default function ProductsPage() {
 
     return products.filter((item) => {
       const matchesSearch =
-        item.name.toLowerCase().includes(normalizedSearch) ||
-        item.category.toLowerCase().includes(normalizedSearch);
+        normalizeText(item.name).toLowerCase().includes(normalizedSearch) ||
+        normalizeText(item.category).toLowerCase().includes(normalizedSearch);
 
       const matchesCategory =
-        categoryFilter === 'TODAS' || item.category === categoryFilter;
+        categoryFilter === 'TODAS' ||
+        normalizeText(item.category) === categoryFilter;
 
-      return matchesSearch && matchesCategory;
+      const matchesDirty = showOnlyDirty ? item.isDirty : true;
+
+      return matchesSearch && matchesCategory && matchesDirty;
     });
-  }, [products, search, categoryFilter]);
+  }, [products, search, categoryFilter, showOnlyDirty]);
+
+  const groupedProducts = useMemo(() => {
+    const sorted = sortProducts(filteredProducts, sortMode);
+    const map = new Map();
+
+    for (const product of sorted) {
+      const category = normalizeText(product.category) || 'Sin categoría';
+
+      if (!map.has(category)) {
+        map.set(category, {
+          id: category,
+          name: category,
+          products: [],
+        });
+      }
+
+      map.get(category).products.push(product);
+    }
+
+    return Array.from(map.values());
+  }, [filteredProducts, sortMode]);
+
+  useEffect(() => {
+    if (!groupedProducts.length) {
+      setExpandedCategories({});
+      return;
+    }
+
+    setExpandedCategories((prev) => {
+      const next = { ...prev };
+
+      groupedProducts.forEach((group) => {
+        if (typeof next[group.id] === 'undefined') {
+          next[group.id] = true;
+        }
+      });
+
+      return next;
+    });
+  }, [groupedProducts]);
 
   const totalProducts = products.length;
 
@@ -431,9 +536,36 @@ export default function ProductsPage() {
 
   const hasTodayInventory = !!inventoryId && !!inventoryData;
 
+  const visibleProductsCount = groupedProducts.reduce(
+    (sum, group) => sum + group.products.length,
+    0
+  );
+
+  function toggleCategory(categoryId) {
+    setExpandedCategories((prev) => ({
+      ...prev,
+      [categoryId]: !prev[categoryId],
+    }));
+  }
+
+  function expandAll() {
+    const next = {};
+    groupedProducts.forEach((group) => {
+      next[group.id] = true;
+    });
+    setExpandedCategories(next);
+  }
+
+  function collapseAll() {
+    const next = {};
+    groupedProducts.forEach((group) => {
+      next[group.id] = false;
+    });
+    setExpandedCategories(next);
+  }
+
   return (
     <div className="space-y-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      {/* Encabezado */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 sm:p-6">
         <p className="text-sm font-medium text-blue-400">Editor del día</p>
 
@@ -457,7 +589,6 @@ export default function ProductsPage() {
         </div>
       </section>
 
-      {/* Resumen */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <InfoCard
           icon={<Package className="h-5 w-5" />}
@@ -488,7 +619,6 @@ export default function ProductsPage() {
         />
       </section>
 
-      {/* Aviso si no hay inventario */}
       {!loading && !hasTodayInventory && (
         <section className="rounded-3xl border border-yellow-900/60 bg-yellow-950/20 p-5">
           <div className="flex gap-3">
@@ -501,7 +631,6 @@ export default function ProductsPage() {
         </section>
       )}
 
-      {/* Alta manual */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 sm:p-6">
         <div className="flex items-center gap-2">
           <Plus className="h-5 w-5 text-blue-400" />
@@ -557,7 +686,6 @@ export default function ProductsPage() {
         </div>
       </section>
 
-      {/* Lista editable */}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4 sm:p-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -569,29 +697,101 @@ export default function ProductsPage() {
             </p>
           </div>
 
-          <div className="flex flex-col gap-3 md:flex-row">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-              <input
-                type="text"
-                placeholder="Buscar producto o categoría"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 py-3 pl-10 pr-4 text-white outline-none transition focus:border-blue-500 md:w-72"
-              />
-            </div>
-
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={expandAll}
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
             >
-              {categories.map((category) => (
-                <option key={category} value={category}>
-                  {category === 'TODAS' ? 'Todas las categorías' : category}
-                </option>
-              ))}
-            </select>
+              <ChevronDown className="h-4 w-4" />
+              Expandir todo
+            </button>
+
+            <button
+              type="button"
+              onClick={collapseAll}
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800"
+            >
+              <ChevronUp className="h-4 w-4" />
+              Contraer todo
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto_auto_auto]">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+            <input
+              type="text"
+              placeholder="Buscar producto o categoría"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 py-3 pl-10 pr-10 text-white outline-none transition focus:border-blue-500"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 transition hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+          >
+            {categories.map((category) => (
+              <option key={category} value={category}>
+                {category === 'TODAS' ? 'Todas las categorías' : category}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value)}
+            className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+          >
+            <option value="name">Ordenar: nombre</option>
+            <option value="category">Ordenar: categoría</option>
+            <option value="stock-desc">Ordenar: stock mayor</option>
+            <option value="stock-asc">Ordenar: stock menor</option>
+          </select>
+
+          <label className="inline-flex min-h-[48px] items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-200">
+            <Filter className="h-4 w-4" />
+            <span>Solo cambios</span>
+            <input
+              type="checkbox"
+              checked={showOnlyDirty}
+              onChange={(e) => setShowOnlyDirty(e.target.checked)}
+              className="h-4 w-4 accent-blue-600"
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+            <p className="text-sm text-zinc-400">Categorías visibles</p>
+            <p className="mt-1 text-xl font-bold text-white">
+              {groupedProducts.length}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+            <p className="text-sm text-zinc-400">Productos visibles</p>
+            <p className="mt-1 text-xl font-bold text-white">
+              {visibleProductsCount}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+            <p className="text-sm text-zinc-400">Cambios pendientes</p>
+            <p className="mt-1 text-xl font-bold text-white">{dirtyCount}</p>
           </div>
         </div>
 
@@ -617,221 +817,165 @@ export default function ProductsPage() {
               Cargando productos del día...
             </div>
           </div>
-        ) : filteredProducts.length === 0 ? (
+        ) : groupedProducts.length === 0 ? (
           <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-6 text-sm text-zinc-400">
             {hasTodayInventory
               ? 'No hay productos para mostrar con ese filtro.'
               : 'No hay productos cargados para hoy.'}
           </div>
         ) : (
-          <>
-            {/* Tabla escritorio */}
-            <div className="mt-6 hidden overflow-hidden rounded-3xl border border-zinc-800 xl:block">
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-zinc-800">
-                  <thead className="bg-zinc-900">
-                    <tr>
-                      <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                        Producto
-                      </th>
-                      <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                        Categoría
-                      </th>
-                      <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                        Stock
-                      </th>
-                      <th className="px-4 py-4 text-right text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                        Acciones
-                      </th>
-                    </tr>
-                  </thead>
+          <div className="mt-6 space-y-4">
+            {groupedProducts.map((group) => {
+              const isExpanded = expandedCategories[group.id] ?? true;
 
-                  <tbody className="divide-y divide-zinc-800 bg-zinc-950">
-                    {filteredProducts.map((product) => {
-                      const isSaving = savingRowId === product.id;
-                      const isDeleting = deletingRowId === product.id;
-
-                      return (
-                        <tr key={product.id} className="align-top">
-                          <td className="px-4 py-4">
-                            <input
-                              type="text"
-                              value={product.name}
-                              onChange={(e) =>
-                                updateLocalField(
-                                  product.id,
-                                  'name',
-                                  e.target.value
-                                )
-                              }
-                              className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
-                            />
-                          </td>
-
-                          <td className="px-4 py-4">
-                            <input
-                              type="text"
-                              value={product.category}
-                              onChange={(e) =>
-                                updateLocalField(
-                                  product.id,
-                                  'category',
-                                  e.target.value
-                                )
-                              }
-                              className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
-                            />
-                          </td>
-
-                          <td className="px-4 py-4">
-                            <input
-                              type="number"
-                              min="0"
-                              value={product.stock}
-                              onChange={(e) =>
-                                updateLocalField(
-                                  product.id,
-                                  'stock',
-                                  e.target.value
-                                )
-                              }
-                              className="w-32 rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
-                            />
-                          </td>
-
-                          <td className="px-4 py-4">
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => saveRow(product)}
-                                disabled={isSaving || isDeleting}
-                                className="inline-flex items-center gap-2 rounded-2xl border border-blue-700 bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {isSaving ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Save className="h-4 w-4" />
-                                )}
-                                {isSaving ? 'Guardando...' : 'Guardar'}
-                              </button>
-
-                              <button
-                                onClick={() => removeProduct(product.id)}
-                                disabled={isSaving || isDeleting}
-                                className="inline-flex items-center gap-2 rounded-2xl border border-red-800 bg-red-950/50 px-4 py-2 text-sm font-medium text-red-300 transition hover:bg-red-900/60 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {isDeleting ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="h-4 w-4" />
-                                )}
-                                {isDeleting ? 'Quitando...' : 'Quitar'}
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Cards móvil */}
-            <div className="mt-6 grid gap-4 xl:hidden">
-              {filteredProducts.map((product) => {
-                const isSaving = savingRowId === product.id;
-                const isDeleting = deletingRowId === product.id;
-
-                return (
-                  <article
-                    key={product.id}
-                    className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-4"
+              return (
+                <article
+                  key={group.id}
+                  className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900/40"
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleCategory(group.id)}
+                    className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-zinc-900 sm:px-5"
                   >
-                    <div className="grid gap-3">
-                      <div>
-                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Producto
-                        </label>
-                        <input
-                          type="text"
-                          value={product.name}
-                          onChange={(e) =>
-                            updateLocalField(product.id, 'name', e.target.value)
-                          }
-                          className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
-                        />
-                      </div>
+                    <div className="min-w-0">
+                      <h3 className="break-words text-base font-bold text-blue-400 sm:text-lg">
+                        {group.name}
+                      </h3>
+                      <p className="mt-1 text-sm text-zinc-400">
+                        {group.products.length} productos
+                      </p>
+                    </div>
 
-                      <div>
-                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Categoría
-                        </label>
-                        <input
-                          type="text"
-                          value={product.category}
-                          onChange={(e) =>
-                            updateLocalField(
-                              product.id,
-                              'category',
-                              e.target.value
-                            )
-                          }
-                          className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
-                        />
-                      </div>
+                    <div className="shrink-0 rounded-2xl border border-zinc-800 bg-zinc-950 p-2 text-zinc-300">
+                      {isExpanded ? (
+                        <ChevronUp className="h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
+                    </div>
+                  </button>
 
-                      <div>
-                        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Stock
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={product.stock}
-                          onChange={(e) =>
-                            updateLocalField(
-                              product.id,
-                              'stock',
-                              e.target.value
-                            )
-                          }
-                          className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
-                        />
-                      </div>
+                  {isExpanded && (
+                    <div className="border-t border-zinc-800 p-4 sm:p-5">
+                      <div className="grid gap-4">
+                        {group.products.map((product) => {
+                          const isSaving = savingRowId === product.id;
+                          const isDeleting = deletingRowId === product.id;
 
-                      <div className="grid grid-cols-2 gap-3 pt-2">
-                        <button
-                          onClick={() => saveRow(product)}
-                          disabled={isSaving || isDeleting}
-                          className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
-                        >
-                          {isSaving ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Save className="h-4 w-4" />
-                          )}
-                          {isSaving ? 'Guardando...' : 'Guardar'}
-                        </button>
+                          return (
+                            <article
+                              key={product.id}
+                              className="rounded-3xl border border-zinc-800 bg-zinc-950 p-4"
+                            >
+                              <div className="grid gap-3">
+                                <div className="grid gap-3 xl:grid-cols-3">
+                                  <div>
+                                    <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                      Producto
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={product.name}
+                                      onChange={(e) =>
+                                        updateLocalField(
+                                          product.id,
+                                          'name',
+                                          e.target.value
+                                        )
+                                      }
+                                      className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
+                                    />
+                                  </div>
 
-                        <button
-                          onClick={() => removeProduct(product.id)}
-                          disabled={isSaving || isDeleting}
-                          className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-red-800 bg-red-950/40 px-4 py-3 text-sm font-semibold text-red-300 transition hover:bg-red-900/60 disabled:opacity-60"
-                        >
-                          {isDeleting ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                          {isDeleting ? 'Quitando...' : 'Quitar'}
-                        </button>
+                                  <div>
+                                    <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                      Categoría
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={product.category}
+                                      onChange={(e) =>
+                                        updateLocalField(
+                                          product.id,
+                                          'category',
+                                          e.target.value
+                                        )
+                                      }
+                                      className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                      Stock
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={product.stock}
+                                      onChange={(e) =>
+                                        updateLocalField(
+                                          product.id,
+                                          'stock',
+                                          e.target.value
+                                        )
+                                      }
+                                      className="w-full rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-3 text-sm text-white outline-none transition focus:border-blue-500"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2">
+                                  <span className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1 text-xs font-medium text-zinc-300">
+                                    Estado: {product.status}
+                                  </span>
+
+                                  {product.isDirty && (
+                                    <span className="rounded-xl border border-yellow-800 bg-yellow-950/40 px-3 py-1 text-xs font-medium text-yellow-300">
+                                      Cambio pendiente
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3 pt-2 sm:flex sm:flex-wrap">
+                                  <button
+                                    onClick={() => saveRow(product)}
+                                    disabled={isSaving || isDeleting}
+                                    className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
+                                  >
+                                    {isSaving ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Save className="h-4 w-4" />
+                                    )}
+                                    {isSaving ? 'Guardando...' : 'Guardar'}
+                                  </button>
+
+                                  <button
+                                    onClick={() => removeProduct(product.id)}
+                                    disabled={isSaving || isDeleting}
+                                    className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl border border-red-800 bg-red-950/40 px-4 py-3 text-sm font-semibold text-red-300 transition hover:bg-red-900/60 disabled:opacity-60"
+                                  >
+                                    {isDeleting ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="h-4 w-4" />
+                                    )}
+                                    {isDeleting ? 'Quitando...' : 'Quitar'}
+                                  </button>
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })}
                       </div>
                     </div>
-                  </article>
-                );
-              })}
-            </div>
-          </>
+                  )}
+                </article>
+              );
+            })}
+          </div>
         )}
       </section>
     </div>
